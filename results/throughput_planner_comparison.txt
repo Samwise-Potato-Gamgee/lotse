@@ -1,0 +1,7 @@
+continuous throughput comparison, no delays (orders per 1,000 steps)
+  fleet | prioritized:per1000 completed wait | cbs:per1000 completed wait fallbacks failures
+      2 |      51.4       411  185.3 |     52.2       418  185.1         0        0
+      5 |     114.2       914  165.1 |    116.6       933  164.5         0        0
+     10 |     168.5      1348  150.0 |    173.5      1388  148.5         2        0
+     15 |     178.4      1427  147.1 |    185.6      1485  144.5        43        0
+     20 |     182.4      1459  145.8 |    191.5      1532  143.1       108        0

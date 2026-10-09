@@ -1,0 +1,37 @@
+continuous throughput benchmark
+  assumption: one grid step is 1.0 second
+throughput (orders completed per 1,000 steps and per hour)
+  fleet | no-delay:per1000 per_hour completed | delayed:per1000 per_hour completed | wait:mean p95 longest
+      2 |      53.2    191.7       639 |     47.8    171.9       573 |  278.5   544    598
+      5 |     117.4    422.7      1409 |    101.2    364.2      1214 |  252.9   508    576
+     10 |     169.8    611.4      2038 |    150.2    540.9      1803 |  232.4   492    572
+     15 |     180.2    648.9      2163 |    159.8    575.4      1918 |  227.2   485    598
+     20 |     186.7    672.0      2240 |    161.9    582.9      1943 |  226.4   507    574
+
+throughput by map (orders per 1,000 steps, no delay / delay)
+  map | fleet | no-delay per1000 | delayed per1000 | wait:mean p95 longest
+  warehouse_aisles   |     2 |             45.0 |           41.7 |  281.2   536     589
+  warehouse_aisles   |     5 |            100.0 |           89.2 |  257.8   496     576
+  warehouse_aisles   |    10 |            140.8 |          121.7 |  246.1   492     572
+  warehouse_aisles   |    15 |            140.4 |          127.9 |  241.8   485     572
+  warehouse_aisles   |    20 |            149.6 |          127.1 |  243.9   507     574
+  warehouse_large    |     2 |             37.5 |           32.1 |  285.5   544     598
+  warehouse_large    |     5 |             77.9 |           68.8 |  266.5   508     560
+  warehouse_large    |    10 |            130.4 |          112.9 |  244.2   476     565
+  warehouse_large    |    15 |            160.0 |          138.8 |  232.0   457     598
+  warehouse_large    |    20 |            173.3 |          155.0 |  224.5   469     568
+  warehouse_open     |     2 |             51.7 |           45.8 |  278.5   532     585
+  warehouse_open     |     5 |            112.5 |           98.3 |  254.8   492     557
+  warehouse_open     |    10 |            164.2 |          148.3 |  234.6   469     564
+  warehouse_open     |    15 |            169.2 |          152.1 |  231.9   464     564
+  warehouse_open     |    20 |            166.7 |          149.2 |  234.0   475     559
+  warehouse_rooms    |     2 |             65.8 |           57.9 |  274.6   527     581
+  warehouse_rooms    |     5 |            143.8 |          117.9 |  245.8   474     561
+  warehouse_rooms    |    10 |            206.7 |          185.0 |  218.6   456     568
+  warehouse_rooms    |    15 |            214.2 |          182.1 |  218.4   454     557
+  warehouse_rooms    |    20 |            212.5 |          186.7 |  216.7   450     551
+  warehouse_small    |     2 |             66.2 |           61.2 |  272.6   520     573
+  warehouse_small    |     5 |            152.9 |          131.7 |  239.6   467     529
+  warehouse_small    |    10 |            207.1 |          183.3 |  218.4   463     564
+  warehouse_small    |    15 |            217.5 |          198.3 |  211.7   461     564
+  warehouse_small    |    20 |            231.2 |          191.7 |  212.7   463     564

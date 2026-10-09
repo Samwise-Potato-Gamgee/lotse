@@ -1,0 +1,9 @@
+continuous safety benchmark
+  pass-order: runs 150, deadlocks 0, runs w/ collision or swap 0, collisions 0, swaps 0
+  longest wait 390 steps, orders completed 8006, planning calls 18259, planning failures 0, fallbacks 285 (timeouts 285)
+  control:    runs 150, deadlocks 0, runs w/ collision or swap 60, collisions 586, swaps 13
+
+delay-level breakdown (bad = runs with at least one collision or swap)
+  delay | pass:runs deadlock bad coll swap longest_wait | ctrl:runs deadlock bad coll swap
+  0.000 |     75        0     0      0     0          390 |     75        0     0      0     0
+  0.100 |     75        0     0      0     0          390 |     75        0    60    586    13
