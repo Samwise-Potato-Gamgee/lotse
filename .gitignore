@@ -6,6 +6,9 @@
 /log/
 compile_commands.json
 
+# Public MAPF benchmark data (downloaded, never committed)
+/.bench-data/
+
 # Python bytecode (the Isaac Sim scene script)
 __pycache__/
 *.py[cod]
