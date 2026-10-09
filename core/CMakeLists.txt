@@ -1,7 +1,13 @@
-# lotse_core: the plain C++20 library with no ROS dependency. The ROS 2
-# packages and the grid simulator are thin wrappers around this.
+# Defines lotse_core: the plain C++20 library with no ROS dependency.
+
 add_library(lotse_core
-    src/grid.cpp)
+    src/grid.cpp
+    src/grid_simulator.cpp
+    src/judge.cpp
+    src/map.cpp
+    src/prioritized_planner.cpp
+    src/reservations.cpp
+    src/space_time_search.cpp)
 
 add_library(lotse::core ALIAS lotse_core)
 

@@ -1,7 +1,12 @@
+# GoogleTest unit tests for lotse_core.
+
 find_package(GTest REQUIRED)
 
 add_executable(lotse_core_tests
-    core/grid_test.cpp)
+    core/grid_test.cpp
+    core/map_test.cpp
+    core/planning_test.cpp
+    sim/grid_simulator_test.cpp)
 
 target_link_libraries(lotse_core_tests
     PRIVATE

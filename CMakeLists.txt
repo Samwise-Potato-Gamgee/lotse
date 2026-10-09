@@ -1,3 +1,5 @@
+# Top-level build: the C++20 core library, its unit tests and the tools.
+
 cmake_minimum_required(VERSION 3.22)
 
 project(lotse
@@ -5,9 +7,6 @@ project(lotse
     DESCRIPTION "Multi-robot warehouse fleet manager"
     LANGUAGES CXX)
 
-# ---------------------------------------------------------------------------
-# Global settings
-# ---------------------------------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -23,9 +22,7 @@ option(LOTSE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 set(LOTSE_SANITIZERS "" CACHE STRING
     "Comma separated sanitizers for build+link, e.g. address,undefined or thread")
 
-# ---------------------------------------------------------------------------
-# A shared warnings interface, applied to every first-party target.
-# ---------------------------------------------------------------------------
+# Warnings interface applied to every first-party target.
 add_library(lotse_project_warnings INTERFACE)
 target_compile_options(lotse_project_warnings INTERFACE
     -Wall
@@ -37,18 +34,12 @@ if(LOTSE_WARNINGS_AS_ERRORS)
     target_compile_options(lotse_project_warnings INTERFACE -Werror)
 endif()
 
-# ---------------------------------------------------------------------------
-# Sanitizers (address/undefined/thread), selected from the command line.
-# ---------------------------------------------------------------------------
 if(LOTSE_SANITIZERS)
     message(STATUS "Lotse: building with sanitizers = ${LOTSE_SANITIZERS}")
     add_compile_options(-fsanitize=${LOTSE_SANITIZERS} -fno-omit-frame-pointer)
     add_link_options(-fsanitize=${LOTSE_SANITIZERS})
 endif()
 
-# ---------------------------------------------------------------------------
-# Targets
-# ---------------------------------------------------------------------------
 add_subdirectory(core)
 
 if(LOTSE_BUILD_TESTS)
