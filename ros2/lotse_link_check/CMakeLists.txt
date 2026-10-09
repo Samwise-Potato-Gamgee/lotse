@@ -1,3 +1,5 @@
+# ROS 2 package: the stage 0 link-check node.
+
 cmake_minimum_required(VERSION 3.22)
 project(lotse_link_check)
 

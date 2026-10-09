@@ -1,21 +1,7 @@
 #!/usr/bin/env bash
-# scripts/check.sh -- the real quality gate for Lotse.
-#
-# Runs the same checks locally that .github/workflows/ci.yml runs on GitHub:
-#   1. clang-format
-#   2. build (clang++, C++20, warnings as errors)
-#   3. unit tests
-#   4. address + undefined sanitizers
-#   5. thread sanitizer
-#   6. clang-tidy (core + tests)
-#   7. colcon build of the ROS 2 packages
-#   8. clang-tidy (ROS 2 package)
-#   9. ROS 2 node self test
-#
-# Everything happens inside the Lotse development image, so the host needs only
-# Docker and nothing needs sudo.
-#
-# Usage: scripts/check.sh
+# Runs the Lotse quality gate inside the development image: clang-format, build
+# with warnings as errors, unit tests, address/undefined and thread sanitizers,
+# clang-tidy, the colcon build of the ROS 2 packages and the node self test.
 
 set -euo pipefail
 
@@ -90,7 +76,6 @@ lotse::run bash -lc '
     mapfile -t files < <(find ros2 -type f -name "*.cpp" | sort)
     clang-tidy -p .build/ros2/build/lotse_link_check "${files[@]}"
 
-    # ROS 2 setup scripts do not tolerate `set -u`; enable it afterwards.
     source /opt/ros/jazzy/setup.bash
     source .build/ros2/install/setup.bash
     set -u

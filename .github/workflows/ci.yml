@@ -1,8 +1,7 @@
 name: ci
 
-# The GitHub Actions runner has no GPU, so the Isaac Sim link check is not run
-# here. This workflow runs exactly the checks that scripts/check.sh runs
-# locally: build, unit tests, sanitizers, clang-tidy and clang-format.
+# Runs the same checks as scripts/check.sh: build, unit tests, sanitizers,
+# clang-tidy and clang-format. The GPU link check is not run here.
 
 on:
   push:

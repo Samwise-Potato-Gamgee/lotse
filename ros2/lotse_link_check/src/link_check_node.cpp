@@ -1,12 +1,6 @@
-// Lotse stage 0 link check.
-//
-// Subscribes to the simulator's odometry, commands a forward velocity for a
-// few seconds, and checks from odometry alone that the robot actually moved.
-// The process exits with status 0 only when the measured travel is at least
-// min_distance_m, which is what the shell wrapper uses as the pass/fail signal.
-//
-// This is deliberately small: it is the seed of the real Lotse robot driver
-// node (stage 6), which will add waypoint following and a LiDAR stop.
+// Stage 0 link check: commands a forward velocity to one simulated robot and
+// checks from the simulator's odometry that the robot moved. It is the seed of
+// the stage 6 driver node.
 
 #include <chrono>
 #include <cmath>
@@ -91,6 +85,7 @@ public:
     }
 
 private:
+    /// Spins until the first odometry message arrives, or the wait times out.
     bool wait_for_odom() {
         const auto deadline = std::chrono::steady_clock::now() +
                               std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -102,7 +97,9 @@ private:
         return odom_count_ > 0U;
     }
 
-    /// Publishes a constant forward velocity for `seconds`, then stops.
+    /// Publishes a forward velocity, then a stop, for the given durations.
+    /// @param seconds how long the velocity is published
+    /// @param forward_speed the forward velocity in m/s
     void drive_for(double seconds, double forward_speed) {
         geometry_msgs::msg::Twist command;
         command.linear.x = forward_speed;
@@ -115,7 +112,6 @@ private:
             rclcpp::spin_some(shared_from_this());
             std::this_thread::sleep_for(kCmdPublishPeriod);
         }
-        // Always send an explicit stop so the robot does not coast on.
         command.linear.x = 0.0;
         cmd_vel_pub_->publish(command);
     }

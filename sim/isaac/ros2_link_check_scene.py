@@ -1,23 +1,6 @@
-#!/usr/bin/env python3
-"""Isaac Sim 5.1 scene for the Lotse stage 0 ROS 2 link check.
-
-Loads the Carter differential-drive robot that ships with Isaac Sim, builds the
-official ROS 2 bridge OmniGraph (twist in -> wheel commands -> ground-truth
-odometry out) inside the simulator, and keeps the simulation running so that a
-ROS 2 node in a second container can drive it and read its position.
-
-Topics
-------
-  /cmd_vel   geometry_msgs/msg/Twist      subscribed by the simulator
-  /odom      nav_msgs/msg/Odometry        published by the simulator (ground truth)
-
-The graph mirrors isaacsim.ros2.bridge's own
-tests/test_differential_base.py::add_differential_drive from the Isaac Sim 5.1
-image, which is the authoritative recipe for this Isaac Sim version.
-
-Run (inside the lotse-isaac container):
-    source /isaac-sim/setup_ros_env.sh
-    /isaac-sim/python.sh sim/isaac/ros2_link_check_scene.py
+"""Isaac Sim 5.1 scene for the Lotse ROS 2 link check: loads one Carter robot,
+subscribes to /cmd_vel and publishes ground-truth /odom through the official
+ROS 2 bridge. Run with /isaac-sim/python.sh after setup_ros_env.sh.
 """
 
 import os
@@ -45,18 +28,21 @@ from pxr import Gf, PhysicsSchemaTools, UsdGeom  # noqa: E402
 
 
 def fail(message: str) -> None:
+    """Prints an error marker, closes the app and exits with status 1."""
     print(f"LOTSE_ISAAC_ERROR {message}", flush=True)
     simulation_app.close()
     sys.exit(1)
 
 
 def build_ros2_diff_drive_graph(graph_path: str, robot_prim: str) -> None:
-    """Wire cmd_vel -> differential controller -> wheels, and odometry out."""
-    keys = og.Controller.Keys
+    """Wires cmd_vel to the wheels and ground-truth odometry out.
+    @param graph_path path of the OmniGraph action graph
+    @param robot_prim prim path of the differential-drive robot
+    """
     og.Controller.edit(
         {"graph_path": graph_path, "evaluator_name": "execution"},
         {
-            keys.CREATE_NODES: [
+            og.Controller.Keys.CREATE_NODES: [
                 ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
                 ("ReadSimTime", "isaacsim.core.nodes.IsaacReadSimulationTime"),
                 ("computeOdom", "isaacsim.core.nodes.IsaacComputeOdometry"),
@@ -67,7 +53,7 @@ def build_ros2_diff_drive_graph(graph_path: str, robot_prim: str) -> None:
                 ("diffController", "isaacsim.robot.wheeled_robots.DifferentialController"),
                 ("artController", "isaacsim.core.nodes.IsaacArticulationController"),
             ],
-            keys.CONNECT: [
+            og.Controller.Keys.CONNECT: [
                 ("OnPlaybackTick.outputs:tick", "computeOdom.inputs:execIn"),
                 ("OnPlaybackTick.outputs:tick", "publishOdom.inputs:execIn"),
                 ("ReadSimTime.outputs:simulationTime", "publishOdom.inputs:timeStamp"),
@@ -84,11 +70,9 @@ def build_ros2_diff_drive_graph(graph_path: str, robot_prim: str) -> None:
                 ("breakAngVel.outputs:z", "diffController.inputs:angularVelocity"),
                 ("diffController.outputs:velocityCommand", "artController.inputs:velocityCommand"),
             ],
-            keys.SET_VALUES: [
+            og.Controller.Keys.SET_VALUES: [
                 ("subscribeTwist.inputs:topicName", CMD_VEL_TOPIC),
                 ("publishOdom.inputs:topicName", ODOM_TOPIC),
-                # Carter's geometry and wheel joint names; same values the Isaac
-                # Sim 5.1 bridge tests use.
                 ("diffController.inputs:wheelRadius", 0.24),
                 ("diffController.inputs:wheelDistance", 0.5),
                 ("artController.inputs:jointNames", ["left_wheel", "right_wheel"]),
@@ -100,6 +84,7 @@ def build_ros2_diff_drive_graph(graph_path: str, robot_prim: str) -> None:
 
 
 def main() -> int:
+    """Loads the robot, builds the bridge graph and runs the simulation."""
     enable_extension("isaacsim.ros2.bridge")
     simulation_app.update()
 
