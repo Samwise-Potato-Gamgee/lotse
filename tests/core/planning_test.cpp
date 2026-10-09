@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "lotse/benchmark/safety_benchmark.hpp"
 #include "lotse/core/prioritized_planner.hpp"
 #include "lotse/core/space_time_search.hpp"
 #include "lotse/sim/grid_simulator.hpp"
@@ -96,6 +97,24 @@ TEST(PrioritizedPlannerTest, BlocksForeverReservedCell) {
         reserved.reserveCell(GridCell{2, 0}, time);
     }
     EXPECT_FALSE(searchRoute(map, agent, reserved, kLimits).has_value());
+}
+
+// Seeded retries solve the one stage 2 instance a single robot order misses.
+TEST(PrioritizedPlannerTest, RetriesSolveTheHardWarehouseInstance) {
+    const std::optional<Map> map =
+        Map::fromFile(std::string(LOTSE_SOURCE_DIR) + "/maps/warehouse_aisles.map");
+    ASSERT_TRUE(map.has_value());
+    const std::optional<std::vector<Agent>> fleet = benchmark::makeFleet(*map, 20, 4);
+    ASSERT_TRUE(fleet.has_value());
+
+    PrioritizedPlanner single{PrioritizedOptions{AgentOrder::FarthestFirst, 0, 0, 1, 0}};
+    EXPECT_FALSE(single.plan(*map, *fleet).has_value());
+
+    PrioritizedPlanner retrying{PrioritizedOptions{AgentOrder::FarthestFirst, 0, 0, 8, 0}};
+    const std::optional<Plan> plan = retrying.plan(*map, *fleet);
+    ASSERT_TRUE(plan.has_value());
+    const judge::RunLog log = sim::followPlanExactly(*plan, plan->makespan());
+    EXPECT_TRUE(judge::analyse(log).safe());
 }
 
 }  // namespace
