@@ -1,0 +1,6 @@
+---
+# Test-only clang-tidy configuration. bugprone-unchecked-optional-access cannot
+# see gtest assertions, so it is switched off for the tests and stays on for the
+# core library and the apps.
+InheritParentConfig: true
+Checks: '-bugprone-unchecked-optional-access'
