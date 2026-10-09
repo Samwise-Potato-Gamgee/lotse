@@ -1,0 +1,37 @@
+pass-order enabled
+  1000 runs = 200 scenarios x 5 delay levels
+  executed runs:       995
+  finished:            995
+  runs w/ collisions:  0
+  collision events:    0
+  runs w/ swaps:       0
+  swap events:         0
+  executed runs w/ a collision or swap: 0 (0.00 %)
+  deadlocks:           0
+  step-limit hits:     0
+  initial plan fails:  5
+  replans:             742
+  replan failures:     19
+
+pass-order disabled (control)
+  1000 runs = 200 scenarios x 5 delay levels
+  executed runs:       995
+  finished:            995
+  runs w/ collisions:  540
+  collision events:    4844
+  runs w/ swaps:       125
+  swap events:         203
+  executed runs w/ a collision or swap: 543 (54.57 %)
+  deadlocks:           0
+  step-limit hits:     0
+  initial plan fails:  5
+  replans:             243
+  replan failures:     4
+
+delay-level breakdown (bad = executed runs with at least one collision or swap)
+  delay | pass:exec pass:bad pass:coll pass:swap | ctrl:exec ctrl:bad ctrl:coll ctrl:swap
+  0.000 |       199        0         0         0 |       199        0         0         0
+  0.050 |       199        0         0         0 |       199      116       802        20
+  0.100 |       199        0         0         0 |       199      133      1014        39
+  0.200 |       199        0         0         0 |       199      147      1400        72
+  0.300 |       199        0         0         0 |       199      147      1628        72

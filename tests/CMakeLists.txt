@@ -6,7 +6,9 @@ add_executable(lotse_core_tests
     core/grid_test.cpp
     core/map_test.cpp
     core/planning_test.cpp
-    sim/grid_simulator_test.cpp)
+    core/executor_test.cpp
+    sim/grid_simulator_test.cpp
+    benchmark/randomized_safety_test.cpp)
 
 target_link_libraries(lotse_core_tests
     PRIVATE

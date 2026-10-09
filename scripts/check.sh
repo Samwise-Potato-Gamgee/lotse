@@ -13,7 +13,7 @@ lotse::build_image
 echo "== 2/9 clang-format =="
 lotse::run bash -lc '
     set -euo pipefail
-    mapfile -t files < <(find core tests ros2 -type f \
+    mapfile -t files < <(find core tests apps ros2 -type f \
         \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) | sort)
     echo "formatting ${#files[@]} C++ files"
     clang-format --dry-run --Werror "${files[@]}"
@@ -60,10 +60,10 @@ lotse::run_tsan bash -lc '
         ctest --test-dir .build/tsan --output-on-failure
 '
 
-echo "== 7/9 clang-tidy (core + tests) =="
+echo "== 7/9 clang-tidy (core + tests + apps) =="
 lotse::run bash -lc '
     set -euo pipefail
-    mapfile -t files < <(find core tests -type f -name "*.cpp" | sort)
+    mapfile -t files < <(find core tests apps -type f -name "*.cpp" | sort)
     clang-tidy -p .build/check "${files[@]}"
 '
 

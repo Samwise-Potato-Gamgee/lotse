@@ -41,6 +41,7 @@ if(LOTSE_SANITIZERS)
 endif()
 
 add_subdirectory(core)
+add_subdirectory(apps)
 
 if(LOTSE_BUILD_TESTS)
     enable_testing()
