@@ -2,6 +2,7 @@
 
 #include "lotse/core/map.hpp"
 
+#include <cstdint>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -38,6 +39,9 @@ namespace {
 [[nodiscard]] bool isFreeSymbol(char symbol) noexcept {
     return symbol == '.' || symbol == 'G' || symbol == 'S';
 }
+
+/// The trailing block the reader is currently inside.
+enum class Block : std::uint8_t { None, Stations, Parking };
 
 }  // namespace
 
@@ -122,29 +126,48 @@ Map Map::fromText(std::string_view text) {
     while (index < lines.size() && lines[index].empty()) {
         ++index;
     }
-    if (index >= lines.size()) {
-        return map;
-    }
-    if (lines[index] != "stations") {
-        throw std::runtime_error("map: unexpected content after the map block");
-    }
-    ++index;
+    Block block = Block::None;
     for (; index < lines.size(); ++index) {
-        if (lines[index].empty()) {
+        const std::string& line = lines[index];
+        if (line.empty()) {
             continue;
         }
-        std::istringstream stream{lines[index]};
-        std::string stationName;
+        if (line == "stations") {
+            block = Block::Stations;
+            continue;
+        }
+        if (line == "parking") {
+            block = Block::Parking;
+            continue;
+        }
+        if (block == Block::None) {
+            throw std::runtime_error("map: unexpected content after the map block");
+        }
+        std::istringstream stream{line};
+        if (block == Block::Stations) {
+            std::string stationName;
+            int x = 0;
+            int y = 0;
+            if (!(stream >> stationName >> x >> y)) {
+                throw std::runtime_error("map: station line must be 'name x y'");
+            }
+            const GridCell cell{x, y};
+            if (!map.isFree(cell)) {
+                throw std::runtime_error("map: station is not on a free cell");
+            }
+            map.stations_.emplace_back(stationName, cell);
+            continue;
+        }
         int x = 0;
         int y = 0;
-        if (!(stream >> stationName >> x >> y)) {
-            throw std::runtime_error("map: station line must be 'name x y'");
+        if (!(stream >> x >> y)) {
+            throw std::runtime_error("map: parking line must be 'x y'");
         }
         const GridCell cell{x, y};
         if (!map.isFree(cell)) {
-            throw std::runtime_error("map: station is not on a free cell");
+            throw std::runtime_error("map: parking cell is not a free cell");
         }
-        map.stations_.emplace_back(stationName, cell);
+        map.parking_cells_.push_back(cell);
     }
     return map;
 }
@@ -184,6 +207,37 @@ std::optional<GridCell> Map::station(std::string_view station_name) const {
     return std::nullopt;
 }
 
+Map Map::withObstacles(const std::vector<GridCell>& cells) const {
+    Map copy = *this;
+    bool changed = false;
+    for (const GridCell& cell : cells) {
+        if (!contains(cell)) {
+            continue;
+        }
+        const auto position =
+            (static_cast<std::size_t>(cell.y) * static_cast<std::size_t>(width_)) +
+            static_cast<std::size_t>(cell.x);
+        if (copy.free_[position]) {
+            copy.free_[position] = false;
+            changed = true;
+        }
+    }
+    if (!changed) {
+        return copy;
+    }
+    copy.free_cells_.clear();
+    copy.free_cells_.reserve(free_cells_.size());
+    for (int y = 0; y < copy.height_; ++y) {
+        for (int x = 0; x < copy.width_; ++x) {
+            const GridCell cell{x, y};
+            if (copy.isFree(cell)) {
+                copy.free_cells_.push_back(cell);
+            }
+        }
+    }
+    return copy;
+}
+
 std::string Map::toString() const {
     std::ostringstream out;
     out << "name " << name_ << "\n";
@@ -200,6 +254,12 @@ std::string Map::toString() const {
         out << "stations\n";
         for (const std::pair<std::string, GridCell>& entry : stations_) {
             out << entry.first << " " << entry.second.x << " " << entry.second.y << "\n";
+        }
+    }
+    if (!parking_cells_.empty()) {
+        out << "parking\n";
+        for (const GridCell& cell : parking_cells_) {
+            out << cell.x << " " << cell.y << "\n";
         }
     }
     return out.str();

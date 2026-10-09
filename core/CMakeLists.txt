@@ -1,15 +1,23 @@
 # Defines lotse_core: the plain C++20 library with no ROS dependency.
 
 add_library(lotse_core
+    src/cbs.cpp
+    src/continuous_benchmark.cpp
+    src/continuous_runner.cpp
+    src/distance.cpp
     src/executor.cpp
     src/grid.cpp
     src/grid_simulator.cpp
     src/judge.cpp
     src/map.cpp
+    src/mapf_benchmark.cpp
+    src/order.cpp
+    src/pass_order.cpp
     src/prioritized_planner.cpp
     src/reservations.cpp
     src/safety_benchmark.cpp
-    src/space_time_search.cpp)
+    src/space_time_search.cpp
+    src/task_assigner.cpp)
 
 add_library(lotse::core ALIAS lotse_core)
 

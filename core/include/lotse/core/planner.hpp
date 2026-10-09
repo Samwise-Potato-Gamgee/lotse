@@ -32,6 +32,10 @@ public:
 
     /// Returns the planner's name for reports and logs.
     [[nodiscard]] virtual std::string name() const = 0;
+
+    /// Returns true when the last plan call stopped because it hit its time
+    /// limit rather than because no solution exists. The default is false.
+    [[nodiscard]] virtual bool lastCallTimedOut() const noexcept { return false; }
 };
 
 }  // namespace lotse::core

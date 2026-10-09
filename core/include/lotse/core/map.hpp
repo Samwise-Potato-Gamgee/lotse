@@ -1,5 +1,6 @@
-// The warehouse grid: free cells, obstacles and named stations read from a
-// text file. The reader also accepts the public MAPF benchmark map format.
+// The warehouse grid: free cells, obstacles, named stations and parking cells
+// read from a text file. The reader also accepts the public MAPF benchmark map
+// format.
 
 #pragma once
 
@@ -17,8 +18,8 @@ namespace lotse::core {
 class Map {
 public:
     /// Parses a map from text. Headers are `type`, `name`, `height`, `width`,
-    /// then `map` and `height` rows. An optional `stations` block follows with
-    /// `name x y` lines.
+    /// then `map` and `height` rows. Optional `stations` (`name x y`) and
+    /// `parking` (`x y`) blocks follow the rows.
     /// @param text the whole map file contents
     /// @return the parsed map; throws std::runtime_error on malformed input
     [[nodiscard]] static Map fromText(std::string_view text);
@@ -58,6 +59,16 @@ public:
         return stations_;
     }
 
+    /// Returns the cells where idle robots may park, in file order.
+    [[nodiscard]] const std::vector<GridCell>& parkingCells() const noexcept {
+        return parking_cells_;
+    }
+
+    /// Returns a copy with extra obstacle cells. Cells outside the grid or
+    /// already blocked are ignored.
+    /// @param cells the cells to block
+    [[nodiscard]] Map withObstacles(const std::vector<GridCell>& cells) const;
+
     /// Formats the map as text: '.' for free cells, '#' for obstacles.
     [[nodiscard]] std::string toString() const;
 
@@ -68,6 +79,7 @@ private:
     std::vector<bool> free_;
     std::vector<GridCell> free_cells_;
     std::vector<std::pair<std::string, GridCell>> stations_;
+    std::vector<GridCell> parking_cells_;
 };
 
 }  // namespace lotse::core
