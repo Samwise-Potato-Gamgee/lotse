@@ -23,7 +23,10 @@ constexpr const char* kTinyMap =
     "....\n"
     "stations\n"
     "shelf 0 0\n"
-    "dock 3 2\n";
+    "dock 3 2\n"
+    "parking\n"
+    "3 0\n"
+    "0 2\n";
 
 // Checks the name, width and height of a parsed map.
 TEST(MapTest, ReadsHeader) {
@@ -62,6 +65,18 @@ TEST(MapTest, ReadsStations) {
     EXPECT_EQ(dock.value(), (GridCell{3, 2}));
     EXPECT_FALSE(map.station("missing").has_value());
     EXPECT_EQ(map.stations().size(), 2U);
+}
+
+// Checks the parking cells and that they are kept off obstacles.
+TEST(MapTest, ReadsParkingCells) {
+    const Map map = Map::fromText(kTinyMap);
+    ASSERT_EQ(map.parkingCells().size(), 2U);
+    EXPECT_EQ(map.parkingCells().front(), (GridCell{3, 0}));
+    for (const GridCell& cell : map.parkingCells()) {
+        EXPECT_TRUE(map.isFree(cell));
+    }
+    EXPECT_THROW((void)Map::fromText("height 1\nwidth 2\nmap\n.#\nparking\n1 0\n"),
+                 std::runtime_error);
 }
 
 // Checks that the public MAPF benchmark characters are accepted.
