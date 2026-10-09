@@ -1,0 +1,23 @@
+name: ci
+
+# The GitHub Actions runner has no GPU, so the Isaac Sim link check is not run
+# here. This workflow runs exactly the checks that scripts/check.sh runs
+# locally: build, unit tests, sanitizers, clang-tidy and clang-format.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Build the Lotse development image
+        run: docker build -f docker/lotse-dev.Dockerfile -t lotse-dev:jazzy docker
+
+      - name: Run the quality gate
+        run: ./scripts/check.sh

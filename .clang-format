@@ -1,0 +1,33 @@
+---
+# Lotse C++ formatting: Google style with 4-space indent and a 100 column limit.
+Language: Cpp
+BasedOnStyle: Google
+Standard: c++20
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+AccessModifierOffset: -4
+AlignAfterOpenBracket: Align
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BreakBeforeBraces: Attach
+ConstructorInitializerIndentWidth: 4
+DerivePointerAlignment: false
+PointerAlignment: Left
+SpaceAfterTemplateKeyword: true
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  # C++ standard library
+  - Regex: '^<[a-z_]+>$'
+    Priority: 1
+  # ROS 2 headers
+  - Regex: '^<(rclcpp|rcl|geometry_msgs|nav_msgs|std_msgs|builtin_interfaces)/'
+    Priority: 2
+  # Project headers
+  - Regex: '^"lotse/'
+    Priority: 3
+  - Regex: '.*'
+    Priority: 4

@@ -1,0 +1,22 @@
+# Build and check output (all generated inside Docker / colcon)
+/.build/
+/build/
+/build-*/
+/install/
+/log/
+compile_commands.json
+
+# Python bytecode (the Isaac Sim scene script)
+__pycache__/
+*.py[cod]
+
+# Isaac Sim / Omniverse caches and logs
+.cache/
+*.log
+
+# Editors and OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

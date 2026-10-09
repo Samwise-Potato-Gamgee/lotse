@@ -1,0 +1,35 @@
+---
+# Lotse clang-tidy settings. The goal is to catch real bugs and keep the code
+# modern, not to enforce taste. Every enabled warning is an error in
+# scripts/check.sh.
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-avoid-const-or-ref-data-members,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-vararg,
+  -modernize-use-nodiscard,
+  -modernize-use-trailing-return-type,
+  -readability-avoid-const-params-in-decls,
+  -readability-convert-member-functions-to-static,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length,
+  -readability-identifier-naming,
+  -readability-magic-numbers,
+  -readability-make-member-function-const
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(core|ros2|tests)/.*\.(hpp|h)$'
+FormatStyle: file
+UseColor: false
