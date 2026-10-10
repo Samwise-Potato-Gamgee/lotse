@@ -13,7 +13,7 @@ lotse::build_image
 echo "== 2/9 clang-format =="
 lotse::run bash -lc '
     set -euo pipefail
-    mapfile -t files < <(find core tests apps ros2 -type f \
+    mapfile -t files < <(find core tests apps ros2 service -type f \
         \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) | sort)
     echo "formatting ${#files[@]} C++ files"
     clang-format --dry-run --Werror "${files[@]}"
@@ -63,7 +63,7 @@ lotse::run_tsan bash -lc '
 echo "== 7/9 clang-tidy (core + tests + apps) =="
 lotse::run bash -lc '
     set -euo pipefail
-    mapfile -t files < <(find core tests apps -type f -name "*.cpp" | sort)
+    mapfile -t files < <(find core tests apps service -type f -name "*.cpp" | sort)
     clang-tidy -p .build/check "${files[@]}"
 '
 
@@ -73,8 +73,10 @@ lotse::colcon_build
 echo "== 9/9 clang-tidy (ROS 2) + node self test =="
 lotse::run bash -lc '
     set -eo pipefail
-    mapfile -t files < <(find ros2 -type f -name "*.cpp" | sort)
-    clang-tidy -p .build/ros2/build/lotse_link_check "${files[@]}"
+    for package in lotse_link_check lotse_ros; do
+        mapfile -t files < <(find "ros2/${package}" -type f -name "*.cpp" | sort)
+        clang-tidy -p ".build/ros2/build/${package}" "${files[@]}"
+    done
 
     source /opt/ros/jazzy/setup.bash
     source .build/ros2/install/setup.bash
