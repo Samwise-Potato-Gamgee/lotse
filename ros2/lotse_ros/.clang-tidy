@@ -1,0 +1,6 @@
+---
+# ROS 2 callback configuration. rclcpp passes the shared pointer of a received
+# message by value to every subscription callback, so the by-value parameter is
+# part of the ROS API, not a copy we can avoid.
+InheritParentConfig: true
+Checks: '-performance-unnecessary-value-param'

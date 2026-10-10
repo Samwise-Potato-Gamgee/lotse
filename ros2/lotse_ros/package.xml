@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lotse_ros</name>
+  <version>0.1.0</version>
+  <description>
+    The ROS 2 side of Lotse: the robot side adapter, the per-robot driver node,
+    the stand-in differential-drive simulator and the independent contact judge.
+  </description>
+  <maintainer email="b.lingaraju@edu.rptu.de">Bharath Lingaraju</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
