@@ -2,10 +2,13 @@
 
 add_library(lotse_core
     src/cbs.cpp
+    src/clock.cpp
     src/continuous_benchmark.cpp
     src/continuous_runner.cpp
     src/distance.cpp
     src/executor.cpp
+    src/fleet_manager.cpp
+    src/geometry.cpp
     src/grid.cpp
     src/grid_simulator.cpp
     src/judge.cpp

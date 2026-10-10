@@ -36,10 +36,14 @@ using CellSchedule = std::unordered_map<GridCell, std::vector<CellInterval>, Gri
 /// @param advancing whether each robot advances this step
 /// @param routes every robot's current route
 /// @param schedule the planned visits per cell
+/// @param lockstep true when every robot advances exactly one cell per step, so
+///        a cell another robot leaves this step is free at the end of it; false
+///        in real time, where a cell must also be free right now
 [[nodiscard]] bool passOrderAllows(int mover, GridCell target, int arrivalIndex,
                                    const std::vector<int>& currentIndex,
                                    const std::vector<int>& nextIndex,
                                    const std::vector<bool>& advancing,
-                                   const std::vector<Route>& routes, const CellSchedule& schedule);
+                                   const std::vector<Route>& routes, const CellSchedule& schedule,
+                                   bool lockstep = true);
 
 }  // namespace lotse::core

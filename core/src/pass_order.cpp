@@ -28,7 +28,7 @@ CellSchedule buildCellSchedule(const std::vector<Route>& routes) {
 bool passOrderAllows(int mover, GridCell target, int arrivalIndex,
                      const std::vector<int>& currentIndex, const std::vector<int>& nextIndex,
                      const std::vector<bool>& advancing, const std::vector<Route>& routes,
-                     const CellSchedule& schedule) {
+                     const CellSchedule& schedule, bool lockstep) {
     const GridCell origin = routes[static_cast<std::size_t>(mover)].cellAt(
         currentIndex[static_cast<std::size_t>(mover)]);
 
@@ -41,6 +41,9 @@ bool passOrderAllows(int mover, GridCell target, int arrivalIndex,
             return false;
         }
         const GridCell startCell = routes[agent].cellAt(currentIndex[agent]);
+        if (!lockstep && startCell == target) {
+            return false;
+        }
         if (advancing[agent] && startCell == target && endCell == origin) {
             return false;
         }
