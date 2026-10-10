@@ -1,0 +1,174 @@
+/* Styling for the Lotse dashboard: a dark, dense operations view with the map
+   on the left and the order controls on the right. No web fonts. */
+
+:root {
+    --bg: #12161c;
+    --panel: #1b222c;
+    --ink: #e7edf3;
+    --muted: #8fa0b3;
+    --accent: #56c1ff;
+    --free: #2a3442;
+    --wall: #55606f;
+    --pickup: #52c98a;
+    --dropoff: #f0a34a;
+    --parking: #6f7f92;
+    --robot: #56c1ff;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px;
+}
+
+header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    padding: 12px 20px;
+    border-bottom: 1px solid #2a3442;
+}
+
+h1 {
+    font-size: 18px;
+    margin: 0;
+}
+
+h2 {
+    font-size: 14px;
+    margin: 0 0 8px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+#status {
+    color: var(--muted);
+}
+
+main {
+    display: grid;
+    grid-template-columns: minmax(360px, 2fr) minmax(280px, 1fr);
+    gap: 16px;
+    padding: 16px 20px;
+}
+
+.panel {
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.map-panel {
+    grid-row: span 2;
+}
+
+canvas {
+    width: 100%;
+    height: auto;
+    background: var(--free);
+    border-radius: 4px;
+}
+
+.legend {
+    margin-top: 8px;
+    color: var(--muted);
+}
+
+.key {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin: 0 4px 0 12px;
+}
+
+.key.free { background: var(--free); }
+.key.wall { background: var(--wall); }
+.key.pickup { background: var(--pickup); }
+.key.dropoff { background: var(--dropoff); }
+.key.parking { background: var(--parking); }
+
+form {
+    display: grid;
+    gap: 8px;
+}
+
+label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+select, input, button {
+    background: var(--bg);
+    color: var(--ink);
+    border: 1px solid #33404f;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font: inherit;
+}
+
+button {
+    cursor: pointer;
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+button:hover {
+    background: #22303f;
+}
+
+#form-message {
+    min-height: 18px;
+    color: var(--muted);
+}
+
+#throughput {
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 4px 12px;
+    margin: 0;
+}
+
+#throughput dt {
+    color: var(--muted);
+}
+
+#throughput dd {
+    margin: 0;
+    text-align: right;
+}
+
+.orders-panel {
+    grid-column: 2;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    text-align: left;
+    padding: 4px 6px;
+    border-bottom: 1px solid #2a3442;
+}
+
+th {
+    color: var(--muted);
+    font-weight: normal;
+}
+
+button.cancel {
+    border-color: var(--dropoff);
+    color: var(--dropoff);
+    padding: 2px 6px;
+}

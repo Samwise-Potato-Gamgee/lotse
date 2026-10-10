@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.22)
 project(lotse
     VERSION 0.1.0
     DESCRIPTION "Multi-robot warehouse fleet manager"
-    LANGUAGES CXX)
+    LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -40,7 +40,9 @@ if(LOTSE_SANITIZERS)
     add_link_options(-fsanitize=${LOTSE_SANITIZERS})
 endif()
 
+add_subdirectory(third_party)
 add_subdirectory(core)
+add_subdirectory(service)
 add_subdirectory(apps)
 
 if(LOTSE_BUILD_TESTS)

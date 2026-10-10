@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<!-- The Lotse dashboard: one page that draws the map and moving robots, lists
+     orders, offers a submit form and shows throughput. It loads no files from
+     the internet; app.js and style.css sit next to this file. -->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lotse fleet dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+    <h1>Lotse fleet</h1>
+    <span id="status">connecting...</span>
+</header>
+
+<main>
+    <section class="panel map-panel">
+        <h2>Warehouse</h2>
+        <canvas id="map" width="720" height="540"></canvas>
+        <div class="legend">
+            <span class="key free"></span>free
+            <span class="key wall"></span>shelf
+            <span class="key pickup"></span>pickup
+            <span class="key dropoff"></span>drop-off
+            <span class="key parking"></span>parking
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2>Submit an order</h2>
+        <form id="order-form">
+            <label>Pickup <select id="pickup"></select></label>
+            <label>Drop-off <select id="dropoff"></select></label>
+            <label>Priority <input id="priority" type="number" value="0" min="0" max="9"></label>
+            <button type="submit">Submit order</button>
+        </form>
+        <p id="form-message"></p>
+    </section>
+
+    <section class="panel">
+        <h2>Throughput</h2>
+        <dl id="throughput"></dl>
+    </section>
+
+    <section class="panel orders-panel">
+        <h2>Orders</h2>
+        <table id="orders">
+            <thead>
+            <tr><th>id</th><th>state</th><th>robot</th><th>pickup</th><th>drop-off</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
