@@ -1,0 +1,12 @@
+# Keeps the Docker build context small: the runtime image only needs the core,
+# the service, the third-party fetcher, the maps, the config and the dashboard.
+
+.build
+.git
+.github
+.bench-data
+results
+ros2
+sim
+tests
+*.md

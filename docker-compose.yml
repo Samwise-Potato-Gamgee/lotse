@@ -1,0 +1,28 @@
+# Starts the Lotse service with the grid simulator in one container. The
+# dashboard is published on 127.0.0.1:8080 only, so there is no login and no
+# access from other machines.
+services:
+  lotse:
+    build:
+      # Build context and Dockerfile for the runtime image.
+      context: .
+      dockerfile: docker/lotse-service.Dockerfile
+      args:
+        # The development image used as the builder stage.
+        LOTSE_DEV_IMAGE: lotse-dev:jazzy
+    # Name of the built runtime image.
+    image: lotse-service:latest
+    # Container name; Lotse containers always start with "lotse-".
+    container_name: lotse-service
+    ports:
+      # Host binding on the loopback interface only, forwarding to container 8080.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Named volume so the SQLite order database survives a restart.
+      - lotse-data:/data
+    # Restart the service unless the owner stopped it.
+    restart: unless-stopped
+
+volumes:
+  # The order database volume.
+  lotse-data:
