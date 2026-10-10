@@ -12,6 +12,7 @@ add_executable(lotse_core_tests
     core/distance_test.cpp
     core/executor_test.cpp
     core/grid_test.cpp
+    core/geometry_test.cpp
     core/map_layout_test.cpp
     core/map_test.cpp
     core/order_test.cpp
@@ -30,3 +31,18 @@ target_link_libraries(lotse_core_tests
 
 include(GoogleTest)
 gtest_discover_tests(lotse_core_tests)
+
+add_executable(lotse_service_tests
+    service/http_api_test.cpp
+    service/service_test.cpp)
+
+target_compile_definitions(lotse_service_tests PRIVATE LOTSE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+target_link_libraries(lotse_service_tests
+    PRIVATE
+        lotse::service
+        GTest::gtest
+        GTest::gtest_main
+        lotse_project_warnings)
+
+gtest_discover_tests(lotse_service_tests)

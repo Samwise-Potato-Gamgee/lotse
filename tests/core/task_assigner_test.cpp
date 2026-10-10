@@ -35,6 +35,32 @@ TEST(NearestRobotAssignerTest, BreaksTiesByRobotId) {
     EXPECT_EQ(chosen.value(), 0);
 }
 
+// Breaks an equal-route tie by the robot that has finished fewer orders.
+TEST(NearestRobotAssignerTest, PrefersFewerCompletedOnAnEqualRoute) {
+    const Map map = Map::fromText(kRow);
+    const std::vector<GridCell> positions{{4, 0}, {6, 0}};
+    const Order order{0, GridCell{5, 0}, GridCell{8, 0}, 0, 0};
+    const std::vector<int> completed{5, 0};
+    NearestRobotAssigner assigner;
+    const std::optional<int> chosen =
+        assigner.chooseRobot(map, order, positions, {0, 1}, completed);
+    ASSERT_TRUE(chosen.has_value());
+    EXPECT_EQ(chosen.value(), 1);
+}
+
+// The shortest route wins even when the other robot has finished fewer orders.
+TEST(NearestRobotAssignerTest, ShortestRouteBeatsFewerCompleted) {
+    const Map map = Map::fromText(kRow);
+    const std::vector<GridCell> positions{{0, 0}, {4, 0}, {8, 0}};
+    const Order order{0, GridCell{5, 0}, GridCell{8, 0}, 0, 0};
+    const std::vector<int> completed{0, 9, 0};
+    NearestRobotAssigner assigner;
+    const std::optional<int> chosen =
+        assigner.chooseRobot(map, order, positions, {1, 2}, completed);
+    ASSERT_TRUE(chosen.has_value());
+    EXPECT_EQ(chosen.value(), 1);
+}
+
 // Only the free robots are considered.
 TEST(NearestRobotAssignerTest, IgnoresBusyRobots) {
     const Map map = Map::fromText(kRow);
