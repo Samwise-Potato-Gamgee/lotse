@@ -22,6 +22,7 @@ struct PrioritizedOptions {
     int maxHorizon = 0;
     int attempts = 8;
     int timeLimitMs = 0;
+    bool oneStepGap = false;
 };
 
 /// The longest single-leg route a continuous run is expected to need. Limits

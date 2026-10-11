@@ -18,11 +18,14 @@ namespace lotse::core {
 namespace {
 
 /// Adds one finished route to the reservations, including the goal held until
-/// the horizon so no later robot routes through a finished robot.
+/// the horizon so no later robot routes through a finished robot. When
+/// oneStepGap is set the cell a robot leaves is also held for one extra step, so
+/// a real-time follower cannot enter it in the step the robot moves out.
 /// @param reserved the reservation set to extend
 /// @param route the route to reserve
 /// @param horizon the last plan step to reserve
-void reserveRoute(Reservations& reserved, const Route& route, int horizon) {
+/// @param oneStepGap true to hold each vacated cell for one more plan step
+void reserveRoute(Reservations& reserved, const Route& route, int horizon, bool oneStepGap) {
     for (int time = 0; time <= route.steps(); ++time) {
         reserved.reserveCell(route.cellAt(time), time);
     }
@@ -31,6 +34,9 @@ void reserveRoute(Reservations& reserved, const Route& route, int horizon) {
         const GridCell to = route.cellAt(time + 1);
         reserved.reserveMove(from, to, time);
         reserved.reserveMove(to, from, time);
+        if (oneStepGap) {
+            reserved.reserveCell(from, time + 1);
+        }
     }
     for (int time = route.steps(); time <= horizon; ++time) {
         reserved.reserveCell(route.cellAt(route.steps()), time);
@@ -94,10 +100,11 @@ void sortByDistance(std::vector<std::size_t>& order, const std::vector<Agent>& a
 /// @param horizon the last plan step
 /// @param deadline the wall-clock deadline
 /// @param timedOut set to true when the deadline is reached
+/// @param oneStepGap true to hold each vacated cell for one more plan step
 [[nodiscard]] std::optional<Plan> planInOrder(const Map& map, const std::vector<Agent>& agents,
                                               const std::vector<std::size_t>& order, int horizon,
                                               const std::chrono::steady_clock::time_point& deadline,
-                                              bool& timedOut) {
+                                              bool& timedOut, bool oneStepGap) {
     Reservations reserved;
     Plan plan;
     plan.routes.resize(agents.size());
@@ -111,7 +118,7 @@ void sortByDistance(std::vector<std::size_t>& order, const std::vector<Agent>& a
         if (!route.has_value()) {
             return std::nullopt;
         }
-        reserveRoute(reserved, *route, horizon);
+        reserveRoute(reserved, *route, horizon, oneStepGap);
         plan.routes[index] = *route;
     }
     return plan;
@@ -143,7 +150,8 @@ std::optional<Plan> PrioritizedPlanner::plan(const Map& map, const std::vector<A
         }
         const std::vector<std::size_t> order = attemptOrder(attempt, agents, options_.order);
         bool timedOut = false;
-        std::optional<Plan> planned = planInOrder(map, agents, order, horizon, deadline, timedOut);
+        std::optional<Plan> planned =
+            planInOrder(map, agents, order, horizon, deadline, timedOut, options_.oneStepGap);
         if (planned.has_value()) {
             return planned;
         }
