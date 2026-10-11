@@ -6,7 +6,7 @@
 #include <memory>
 #include <string>
 
-#include "lotse/service/runtime.hpp"
+#include "lotse/service/fleet_api.hpp"
 
 namespace lotse::service {
 
@@ -14,11 +14,11 @@ namespace lotse::service {
 class ApiServer {
 public:
     /// Prepares the routes and the dashboard mount.
-    /// @param runtime the state the handlers read and change
+    /// @param source the fleet state the handlers read and change
     /// @param bindAddress the interface to listen on, 127.0.0.1 by default
     /// @param port the TCP port, 0 to let the operating system choose one
     /// @param dashboardDir the directory with index.html, app.js and style.css
-    ApiServer(Runtime& runtime, std::string bindAddress, int port, std::string dashboardDir);
+    ApiServer(FleetApiSource& source, std::string bindAddress, int port, std::string dashboardDir);
     ~ApiServer();
 
     ApiServer(const ApiServer&) = delete;
@@ -31,6 +31,9 @@ public:
 
     /// Stops the server and disconnects the WebSocket clients.
     void stop();
+
+    /// Sends the current fleet to every connected dashboard.
+    void publishFleet();
 
     /// Returns the port the server is bound to, or the configured port before
     /// listen() has run.

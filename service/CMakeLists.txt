@@ -4,6 +4,7 @@
 
 add_library(lotse_service
     src/config.cpp
+    src/fleet_json.cpp
     src/http_api.cpp
     src/runtime.cpp
     src/sqlite_order_store.cpp)

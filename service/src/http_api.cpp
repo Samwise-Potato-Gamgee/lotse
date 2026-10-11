@@ -56,7 +56,7 @@ void sendError(httplib::Response& response, int status, const std::string& messa
 }  // namespace
 
 struct ApiServer::Impl {
-    Runtime& runtime;
+    FleetApiSource& source;
     std::string bindAddress;
     int configuredPort;
     std::string dashboardDir;
@@ -68,8 +68,8 @@ struct ApiServer::Impl {
     std::mutex clientsMutex;
     std::set<httplib::ws::WebSocket*> clients;
 
-    Impl(Runtime& runtimeRef, std::string address, int port, std::string dashboard)
-        : runtime(runtimeRef),
+    Impl(FleetApiSource& sourceRef, std::string address, int port, std::string dashboard)
+        : source(sourceRef),
           bindAddress(std::move(address)),
           configuredPort(port),
           dashboardDir(std::move(dashboard)) {
@@ -77,7 +77,7 @@ struct ApiServer::Impl {
             server.set_mount_point("/", dashboardDir);
         }
         registerRoutes();
-        runtime.setUpdateSink([this](const std::string& message) { broadcast(message); });
+        source.setUpdateSink([this](const std::string& message) { broadcast(message); });
     }
 
     Impl(const Impl&) = delete;
@@ -85,7 +85,7 @@ struct ApiServer::Impl {
     Impl(Impl&&) = delete;
     Impl& operator=(Impl&&) = delete;
 
-    ~Impl() { runtime.setUpdateSink(nullptr); }
+    ~Impl() { source.setUpdateSink(nullptr); }
 
     /// Sends one message to every connected dashboard.
     /// @param message the text to send
@@ -101,19 +101,19 @@ struct ApiServer::Impl {
     /// Adds the HTTP, WebSocket and health routes.
     void registerRoutes() {
         server.Get("/health", [this](const httplib::Request&, httplib::Response& response) {
-            sendJson(response, 200, runtime.healthJson());
+            sendJson(response, 200, source.healthJson());
         });
         server.Get("/map", [this](const httplib::Request&, httplib::Response& response) {
-            sendJson(response, 200, runtime.mapJson());
+            sendJson(response, 200, source.mapJson());
         });
         server.Get("/fleet", [this](const httplib::Request&, httplib::Response& response) {
-            sendJson(response, 200, runtime.fleetJson());
+            sendJson(response, 200, source.fleetJson());
         });
         server.Get("/throughput", [this](const httplib::Request&, httplib::Response& response) {
-            sendJson(response, 200, runtime.throughputJson());
+            sendJson(response, 200, source.throughputJson());
         });
         server.Get("/orders", [this](const httplib::Request&, httplib::Response& response) {
-            sendJson(response, 200, runtime.ordersJson());
+            sendJson(response, 200, source.ordersJson());
         });
         server.Get(R"(/orders/(\d+))",
                    [this](const httplib::Request& request, httplib::Response& response) {
@@ -123,7 +123,7 @@ struct ApiServer::Impl {
                            sendError(response, 400, "order id must be a number");
                            return;
                        }
-                       const std::optional<std::string> document = runtime.orderJson(id.value());
+                       const std::optional<std::string> document = source.orderJson(id.value());
                        if (!document.has_value()) {
                            sendError(response, 404, "unknown order '" + idText + "'");
                            return;
@@ -145,8 +145,8 @@ struct ApiServer::Impl {
             }
             try {
                 const int priority = body.value("priority", 0);
-                const int id = runtime.submitOrder(body.at("pickup").get<std::string>(),
-                                                   body.at("dropoff").get<std::string>(), priority);
+                const int id = source.submitOrder(body.at("pickup").get<std::string>(),
+                                                  body.at("dropoff").get<std::string>(), priority);
                 json document;
                 document["id"] = id;
                 document["state"] = "pending";
@@ -165,7 +165,7 @@ struct ApiServer::Impl {
                 sendError(response, 400, "order id must be a number");
                 return;
             }
-            switch (runtime.cancelOrder(id.value())) {
+            switch (source.cancelOrder(id.value())) {
                 case CancelOutcome::Cancelled: {
                     json document;
                     document["id"] = id.value();
@@ -189,7 +189,7 @@ struct ApiServer::Impl {
                 const std::lock_guard<std::mutex> lock(clientsMutex);
                 clients.insert(&socket);
             }
-            socket.send(runtime.fleetJson());
+            socket.send(source.fleetJson());
             std::string message;
             while (!stopping.load() && socket.read(message) != httplib::ws::Fail) {
             }
@@ -209,9 +209,10 @@ struct ApiServer::Impl {
     }
 };
 
-ApiServer::ApiServer(Runtime& runtime, std::string bindAddress, int port, std::string dashboardDir)
-    : impl_(
-          std::make_unique<Impl>(runtime, std::move(bindAddress), port, std::move(dashboardDir))) {}
+ApiServer::ApiServer(FleetApiSource& source, std::string bindAddress, int port,
+                     std::string dashboardDir)
+    : impl_(std::make_unique<Impl>(source, std::move(bindAddress), port, std::move(dashboardDir))) {
+}
 
 ApiServer::~ApiServer() {
     stop();
@@ -239,6 +240,10 @@ void ApiServer::stop() {
         client->close();
     }
     impl_->clients.clear();
+}
+
+void ApiServer::publishFleet() {
+    impl_->broadcast(impl_->source.fleetJson());
 }
 
 int ApiServer::port() const {

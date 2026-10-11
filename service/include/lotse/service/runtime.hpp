@@ -13,22 +13,12 @@
 #include "lotse/core/clock.hpp"
 #include "lotse/core/order_store.hpp"
 #include "lotse/service/config.hpp"
+#include "lotse/service/fleet_api.hpp"
 
 namespace lotse::service {
 
-/// Thrown when an order cannot be accepted. The message is a clear reason.
-class OrderRejected : public std::runtime_error {
-public:
-    /// Creates the rejection with its reason.
-    /// @param message the reason shown to the caller
-    explicit OrderRejected(const std::string& message);
-};
-
-/// What happened when a cancellation was requested.
-enum class CancelOutcome { Cancelled, InProgress, Finished, NotFound };
-
 /// Runs the fleet manager and the grid simulator in real time.
-class Runtime {
+class Runtime : public FleetApiSource {
 public:
     /// Builds the map, the simulator and the manager, and restores saved orders.
     /// @param config the service settings
@@ -58,38 +48,39 @@ public:
     /// @param priority higher is served sooner
     /// @return the new order id
     /// @throws OrderRejected when a station is unknown or the request is invalid
-    int submitOrder(const std::string& pickupName, const std::string& dropoffName, int priority);
+    int submitOrder(const std::string& pickupName, const std::string& dropoffName,
+                    int priority) override;
 
     /// Cancels an order that has not been picked up yet.
     /// @param orderId the order to cancel
     /// @return Cancelled, InProgress or NotFound
-    CancelOutcome cancelOrder(int orderId);
+    CancelOutcome cancelOrder(int orderId) override;
 
     /// Installs the callback that receives live update messages.
     /// @param sink the callback, empty to stop updates
-    void setUpdateSink(std::function<void(std::string)> sink);
+    void setUpdateSink(std::function<void(std::string)> sink) override;
 
     /// Returns the effective configuration.
     [[nodiscard]] const ServiceConfig& config() const noexcept;
 
     /// Returns the JSON map document.
-    [[nodiscard]] std::string mapJson() const;
+    [[nodiscard]] std::string mapJson() const override;
 
     /// Returns the JSON fleet document.
-    [[nodiscard]] std::string fleetJson() const;
+    [[nodiscard]] std::string fleetJson() const override;
 
     /// Returns the JSON order list.
-    [[nodiscard]] std::string ordersJson() const;
+    [[nodiscard]] std::string ordersJson() const override;
 
     /// Returns one order as JSON.
     /// @param id the order id
-    [[nodiscard]] std::optional<std::string> orderJson(int id) const;
+    [[nodiscard]] std::optional<std::string> orderJson(int id) const override;
 
     /// Returns the JSON throughput document.
-    [[nodiscard]] std::string throughputJson() const;
+    [[nodiscard]] std::string throughputJson() const override;
 
     /// Returns the JSON health document.
-    [[nodiscard]] std::string healthJson() const;
+    [[nodiscard]] std::string healthJson() const override;
 
 private:
     struct Impl;
