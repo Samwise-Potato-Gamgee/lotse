@@ -17,6 +17,13 @@ target_link_libraries(continuous_benchmark
         lotse_project_warnings
         Threads::Threads)
 
+add_executable(liveness_benchmark liveness_benchmark_main.cpp)
+target_link_libraries(liveness_benchmark
+    PRIVATE
+        lotse::core
+        lotse_project_warnings
+        Threads::Threads)
+
 add_executable(continuous_demo continuous_demo_main.cpp)
 target_link_libraries(continuous_demo
     PRIVATE

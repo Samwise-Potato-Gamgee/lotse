@@ -12,6 +12,7 @@ add_library(lotse_core
     src/grid.cpp
     src/grid_simulator.cpp
     src/judge.cpp
+    src/liveness_benchmark.cpp
     src/map.cpp
     src/mapf_benchmark.cpp
     src/order.cpp
