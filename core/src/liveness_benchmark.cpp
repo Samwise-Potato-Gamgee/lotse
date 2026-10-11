@@ -3,6 +3,7 @@
 #include "lotse/benchmark/liveness_benchmark.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <sstream>
 #include <stdexcept>
@@ -12,6 +13,7 @@
 
 #include "lotse/benchmark/continuous_benchmark.hpp"
 #include "lotse/core/clock.hpp"
+#include "lotse/core/continuous_runner.hpp"
 #include "lotse/core/fleet_manager.hpp"
 #include "lotse/core/order.hpp"
 #include "lotse/core/prioritized_planner.hpp"
@@ -49,6 +51,7 @@ namespace {
         out << " r" << status.id << " at(" << status.cell.x << ',' << status.cell.y << ") move("
             << status.target.x << ',' << status.target.y << ") p=" << status.progress << ';';
     }
+    out << " routes: " << manager.routeDump();
     return out.str();
 }
 
@@ -88,16 +91,39 @@ LivenessOutcome runLivenessScenario(const core::Map& map, const LivenessScenario
     config.deadlockPatienceSeconds = scenario.deadlockPatienceSeconds;
     config.backgroundPlanning = scenario.backgroundPlanning;
     config.passOrderEnabled = true;
+    config.diagnostics = scenario.collectDiagnostics;
     core::FleetManager manager(map, side, planner, assigner, clock, config);
 
     const core::OrderGeneratorOptions generator{scenario.orderCount, 0,
                                                 scenario.arrivalIntervalTicks, 0, 3};
     const std::vector<core::Order> orders = core::generateOrders(map, generator, scenario.seed);
 
-    const auto maxTicks = static_cast<long long>(scenario.horizonSeconds / scenario.tickSeconds);
+    if (map.parkingCells().size() >= static_cast<std::size_t>(scenario.fleetSize)) {
+        std::vector<core::Order> baselineOrders = orders;
+        for (core::Order& order : baselineOrders) {
+            const double arrivalSeconds =
+                static_cast<double>(order.arrivalStep) * scenario.tickSeconds;
+            order.arrivalStep =
+                static_cast<int>(std::llround(arrivalSeconds / scenario.cellSeconds));
+        }
+        core::ContinuousConfig baselineConfig;
+        baselineConfig.seed = scenario.seed;
+        baselineConfig.maxSteps = 200000;
+        baselineConfig.passOrderEnabled = true;
+        core::NearestRobotAssigner baselineAssigner;
+        core::PrioritizedPlanner baselinePlanner(core::PrioritizedOptions{
+            core::AgentOrder::FarthestFirst, 0, core::continuousHorizon(map, scenario.fleetSize)});
+        const core::ContinuousResult baseline = core::runContinuous(
+            map, starts, baselineOrders, baselinePlanner, baselineAssigner, baselineConfig);
+        outcome.baselineSeconds = static_cast<double>(baseline.stepsRun) * scenario.cellSeconds;
+    }
+
+    double horizon = scenario.horizonSeconds;
+    if (outcome.baselineSeconds > 0.0) {
+        horizon = std::max(horizon, 3.0 * outcome.baselineSeconds + scenario.tickSeconds);
+    }
+    const auto maxTicks = static_cast<long long>(std::ceil(horizon / scenario.tickSeconds));
     std::size_t nextOrder = 0;
-    int bestCompleted = 0;
-    double lastCompletionSeconds = 0.0;
     for (long long tick = 0; tick < maxTicks; ++tick) {
         clock.advance(std::chrono::duration_cast<std::chrono::steady_clock::duration>(
             std::chrono::duration<double>(scenario.tickSeconds)));
@@ -111,16 +137,8 @@ LivenessOutcome runLivenessScenario(const core::Map& map, const LivenessScenario
         outcome.seconds = static_cast<double>(tick + 1) * scenario.tickSeconds;
         const core::ThroughputStats stats = manager.throughput();
         outcome.ordersCompleted = stats.ordersCompleted;
-        if (stats.ordersCompleted > bestCompleted) {
-            bestCompleted = stats.ordersCompleted;
-            lastCompletionSeconds = outcome.seconds;
-        }
         if (stats.ordersCompleted >= scenario.orderCount) {
             outcome.completed = true;
-            break;
-        }
-        const bool outstanding = stats.ordersOpen > 0 || nextOrder < orders.size();
-        if (outstanding && (outcome.seconds - lastCompletionSeconds) >= scenario.stallSeconds) {
             break;
         }
         if (manager.deadlocked()) {
@@ -138,6 +156,10 @@ LivenessOutcome runLivenessScenario(const core::Map& map, const LivenessScenario
     outcome.planRejections = finalStats.planRejections;
     outcome.deadlocked = manager.deadlocked();
     outcome.stalled = !outcome.completed;
+    outcome.diagnostics = manager.diagnostics();
+    outcome.ratio = outcome.baselineSeconds > 0.0 ? outcome.seconds / outcome.baselineSeconds : 0.0;
+    outcome.slow = !outcome.completed || (outcome.baselineSeconds > 0.0 &&
+                                          outcome.seconds > 3.0 * outcome.baselineSeconds);
     if (outcome.stalled) {
         outcome.detail = describeStall(manager);
     }
@@ -168,8 +190,8 @@ std::vector<LivenessScenario> livenessScenarios(const std::vector<std::string>& 
 
 std::string livenessCsvHeader() {
     return "map,fleet,cell_seconds,slowdown,stop,seed,one_step_gap,orders_completed,orders_total,"
-           "completed,stalled,deadlocked,collisions,swaps,ticks,seconds,"
-           "planning_calls,planning_failures,plan_adoptions,plan_rejections";
+           "completed,stalled,slow,deadlocked,collisions,swaps,ticks,seconds,baseline_seconds,"
+           "ratio,planning_calls,planning_failures,plan_adoptions,plan_rejections";
 }
 
 std::string toLivenessCsvRow(const LivenessOutcome& outcome) {
@@ -179,9 +201,10 @@ std::string toLivenessCsvRow(const LivenessOutcome& outcome) {
         << outcome.scenario.stopProbability << ',' << outcome.scenario.seed << ','
         << (outcome.oneStepGap ? 1 : 0) << ',' << outcome.ordersCompleted << ','
         << outcome.ordersTotal << ',' << (outcome.completed ? 1 : 0) << ','
-        << (outcome.stalled ? 1 : 0) << ',' << (outcome.deadlocked ? 1 : 0) << ','
-        << outcome.collisions << ',' << outcome.swaps << ',' << outcome.ticks << ','
-        << outcome.seconds << ',' << outcome.planningCalls << ',' << outcome.planningFailures << ','
+        << (outcome.stalled ? 1 : 0) << ',' << (outcome.slow ? 1 : 0) << ','
+        << (outcome.deadlocked ? 1 : 0) << ',' << outcome.collisions << ',' << outcome.swaps << ','
+        << outcome.ticks << ',' << outcome.seconds << ',' << outcome.baselineSeconds << ','
+        << outcome.ratio << ',' << outcome.planningCalls << ',' << outcome.planningFailures << ','
         << outcome.planAdoptions << ',' << outcome.planRejections;
     return out.str();
 }
@@ -193,6 +216,9 @@ void accumulateLiveness(LivenessTotals& totals, const LivenessOutcome& outcome) 
     }
     if (outcome.stalled) {
         ++totals.stalledRuns;
+    }
+    if (outcome.slow) {
+        ++totals.slowRuns;
     }
     if (outcome.collisions > 0) {
         ++totals.collisionRuns;

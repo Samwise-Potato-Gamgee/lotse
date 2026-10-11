@@ -1,6 +1,7 @@
 // The liveness benchmark: runs the real-time FleetManager against the grid
 // plant with variable seeded cell-crossing times, a manual clock and continuous
-// orders, then reports whether every order finished or the fleet stalled.
+// orders, then flags a run slow when it misses its discrete stage-3 baseline by
+// three times or more.
 
 #pragma once
 
@@ -8,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "lotse/core/fleet_manager.hpp"
 #include "lotse/core/map.hpp"
 
 namespace lotse::benchmark {
@@ -29,6 +31,7 @@ struct LivenessScenario {
     double stallSeconds = 120.0;
     double horizonSeconds = 600.0;
     bool backgroundPlanning = false;
+    bool collectDiagnostics = false;
     std::uint32_t seed = 0;
 };
 
@@ -49,6 +52,10 @@ struct LivenessOutcome {
     int planningFailures = 0;
     int planAdoptions = 0;
     int planRejections = 0;
+    double baselineSeconds = 0.0;
+    double ratio = 0.0;
+    bool slow = false;
+    core::ManagerDiagnostics diagnostics{};
     std::string detail;
 };
 
@@ -81,6 +88,7 @@ struct LivenessTotals {
     int runs = 0;
     int completedRuns = 0;
     int stalledRuns = 0;
+    int slowRuns = 0;
     int collisionRuns = 0;
     int swapRuns = 0;
     long long ordersCompleted = 0;

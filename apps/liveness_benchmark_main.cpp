@@ -1,7 +1,9 @@
 // Runs the liveness benchmark: the real-time FleetManager against the grid
-// plant over many seeded runs, with and without the one-step gap planning
-// option, and writes the raw CSV plus a short stall summary.
+// plant over many seeded runs, comparing planning from a stale snapshot with
+// planning from the current positions, and writes the raw CSV, the baseline
+// ratios and the stall summary.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -36,6 +38,7 @@ struct Options {
     double tickSeconds = 0.05;
     bool backgroundPlanning = false;
     bool oneStepGap = true;
+    bool diagnostics = false;
     std::string outDir = "results";
     std::string tag;
     int jobs = 0;
@@ -112,6 +115,8 @@ struct Options {
             options.backgroundPlanning = optionValue(argv, argc, index) == "on";
         } else if (flag == "--gap") {
             options.oneStepGap = optionValue(argv, argc, index) == "on";
+        } else if (flag == "--diagnostics") {
+            options.diagnostics = optionValue(argv, argc, index) == "on";
         } else if (flag == "--out-dir") {
             options.outDir = optionValue(argv, argc, index);
         } else if (flag == "--tag") {
@@ -212,6 +217,77 @@ void runRange(const std::vector<lotse::benchmark::LivenessScenario>& scenarios,
     return true;
 }
 
+/// Writes a text file without echoing it to the console.
+/// @param path file to write
+/// @param text the contents
+[[nodiscard]] bool writeSilentFile(const std::string& path, const std::string& text) {
+    std::ofstream out{path};
+    if (!out.is_open()) {
+        return false;
+    }
+    out << text;
+    return true;
+}
+
+/// Builds a CSV with one line per run: the baseline, the ratio and the
+/// right-of-way and planning-failure counts.
+/// @param outcomes every run of one mode
+[[nodiscard]] std::string buildDiagnosticsCsv(
+    const std::vector<lotse::benchmark::LivenessOutcome>& outcomes) {
+    std::ostringstream text;
+    text << "map,fleet,cell_seconds,seed,slow,completed,seconds,baseline_seconds,ratio,"
+            "adoptions,rejections,right_of_way_flips,right_of_way_comparisons,"
+            "planning_timeouts,planning_routing_failures,seconds_without_fresh_plan,"
+            "max_seconds_without_fresh_plan,pass_order_wait_seconds,cell_occupied_wait_seconds,"
+            "no_waypoint_seconds\n";
+    for (const lotse::benchmark::LivenessOutcome& outcome : outcomes) {
+        const lotse::core::ManagerDiagnostics& diag = outcome.diagnostics;
+        double passWait = 0.0;
+        double occupiedWait = 0.0;
+        double noWaypoint = 0.0;
+        for (const double value : diag.passOrderWaitSeconds) {
+            passWait += value;
+        }
+        for (const double value : diag.cellOccupiedWaitSeconds) {
+            occupiedWait += value;
+        }
+        for (const double value : diag.noWaypointSeconds) {
+            noWaypoint += value;
+        }
+        text << outcome.scenario.mapName << ',' << outcome.scenario.fleetSize << ','
+             << outcome.scenario.cellSeconds << ',' << outcome.scenario.seed << ','
+             << (outcome.slow ? 1 : 0) << ',' << (outcome.completed ? 1 : 0) << ','
+             << outcome.seconds << ',' << outcome.baselineSeconds << ',' << outcome.ratio << ','
+             << outcome.planAdoptions << ',' << outcome.planRejections << ','
+             << diag.rightOfWayFlips << ',' << diag.rightOfWayComparisons << ','
+             << diag.planningTimeouts << ',' << diag.planningRoutingFailures << ','
+             << diag.secondsWithoutFreshPlan << ',' << diag.maxSecondsWithoutFreshPlan << ','
+             << passWait << ',' << occupiedWait << ',' << noWaypoint << '\n';
+    }
+    return text.str();
+}
+
+/// Builds a CSV with one line per run and robot: how long each robot waited,
+/// split by the reason the manager held it.
+/// @param outcomes every run of one mode
+[[nodiscard]] std::string buildRobotDiagnosticsCsv(
+    const std::vector<lotse::benchmark::LivenessOutcome>& outcomes) {
+    std::ostringstream text;
+    text << "map,fleet,cell_seconds,seed,robot,pass_order_wait_seconds,"
+            "cell_occupied_wait_seconds,no_waypoint_seconds\n";
+    for (const lotse::benchmark::LivenessOutcome& outcome : outcomes) {
+        const lotse::core::ManagerDiagnostics& diag = outcome.diagnostics;
+        for (std::size_t robot = 0; robot < diag.passOrderWaitSeconds.size(); ++robot) {
+            text << outcome.scenario.mapName << ',' << outcome.scenario.fleetSize << ','
+                 << outcome.scenario.cellSeconds << ',' << outcome.scenario.seed << ',' << robot
+                 << ',' << diag.passOrderWaitSeconds[robot] << ','
+                 << diag.cellOccupiedWaitSeconds[robot] << ',' << diag.noWaypointSeconds[robot]
+                 << '\n';
+        }
+    }
+    return text.str();
+}
+
 /// Builds the short liveness summary.
 /// @param outcomes every run of one mode
 /// @param oneStepGap whether the one-step gap option was on
@@ -231,16 +307,35 @@ void runRange(const std::vector<lotse::benchmark::LivenessScenario>& scenarios,
         }
     }
     text << "  runs " << totals.runs << ", completed " << totals.completedRuns << ", stalled "
-         << totals.stalledRuns << ", deadlocked " << deadlockedRuns << ", runs with collision "
-         << totals.collisionRuns << ", runs with swap " << totals.swapRuns << '\n';
+         << totals.stalledRuns << ", slow " << totals.slowRuns << ", deadlocked " << deadlockedRuns
+         << ", runs with collision " << totals.collisionRuns << ", runs with swap "
+         << totals.swapRuns << '\n';
     text << "  orders completed " << totals.ordersCompleted << " / " << totals.ordersTotal << '\n';
+
+    std::vector<double> ratios;
     for (const lotse::benchmark::LivenessOutcome& outcome : outcomes) {
-        if (outcome.stalled) {
-            text << "  stall: map=" << outcome.scenario.mapName
+        if (outcome.baselineSeconds > 0.0) {
+            ratios.push_back(outcome.ratio);
+        }
+    }
+    if (!ratios.empty()) {
+        std::sort(ratios.begin(), ratios.end());
+        const double median = ratios[ratios.size() / 2U];
+        const double p95 =
+            ratios[static_cast<std::size_t>(0.95 * static_cast<double>(ratios.size() - 1U))];
+        text << "  ratio to baseline: median " << median << ", p95 " << p95 << ", largest "
+             << ratios.back() << '\n';
+    }
+
+    for (const lotse::benchmark::LivenessOutcome& outcome : outcomes) {
+        if (outcome.slow) {
+            text << "  slow: map=" << outcome.scenario.mapName
                  << " fleet=" << outcome.scenario.fleetSize
                  << " cell_seconds=" << outcome.scenario.cellSeconds
                  << " seed=" << outcome.scenario.seed << " at " << outcome.seconds
-                 << " s deadlocked=" << (outcome.deadlocked ? 1 : 0) << "\n";
+                 << " s baseline=" << outcome.baselineSeconds << " ratio=" << outcome.ratio
+                 << " completed=" << (outcome.completed ? 1 : 0)
+                 << " deadlocked=" << (outcome.deadlocked ? 1 : 0) << '\n';
             text << "    " << outcome.detail << '\n';
         }
     }
@@ -280,6 +375,7 @@ int main(int argc, char** argv) {
             scenario.stallSeconds = options.stallSeconds;
             scenario.tickSeconds = options.tickSeconds;
             scenario.backgroundPlanning = options.backgroundPlanning;
+            scenario.collectDiagnostics = options.diagnostics;
             scenario.seed += static_cast<std::uint32_t>(options.seedStart);
         }
         const int jobs = resolveJobs(options.jobs);
@@ -290,7 +386,13 @@ int main(int argc, char** argv) {
             runAll(scenarios, maps, jobs, options.oneStepGap);
         if (!writeCsvFile(options.outDir + "/liveness" + options.tag + "_runs.csv", outcomes) ||
             !writeTextFile(options.outDir + "/liveness" + options.tag + "_summary.txt",
-                           buildSummary(outcomes, options.oneStepGap))) {
+                           buildSummary(outcomes, options.oneStepGap)) ||
+            (options.diagnostics &&
+             (!writeSilentFile(options.outDir + "/liveness" + options.tag + "_diagnostics.csv",
+                               buildDiagnosticsCsv(outcomes)) ||
+              !writeSilentFile(
+                  options.outDir + "/liveness" + options.tag + "_diagnostics_robots.csv",
+                  buildRobotDiagnosticsCsv(outcomes))))) {
             std::fprintf(stderr, "cannot write liveness results into %s\n", options.outDir.c_str());
             return EXIT_FAILURE;
         }
