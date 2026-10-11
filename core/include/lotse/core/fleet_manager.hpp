@@ -74,6 +74,23 @@ struct ThroughputStats {
     int planRejections = 0;
 };
 
+/// Why a robot was held at a cell during one tick.
+enum class HoldReason : std::uint8_t { None, CellOccupied, PassOrder, NoWaypoint };
+
+/// Extra per-run counters used to diagnose slow runs. They are only filled when
+/// the diagnostics switch is on, so ordinary runs pay nothing.
+struct ManagerDiagnostics {
+    std::vector<double> cellOccupiedWaitSeconds;
+    std::vector<double> passOrderWaitSeconds;
+    std::vector<double> noWaypointSeconds;
+    int rightOfWayFlips = 0;
+    int rightOfWayComparisons = 0;
+    int planningTimeouts = 0;
+    int planningRoutingFailures = 0;
+    double secondsWithoutFreshPlan = 0.0;
+    double maxSecondsWithoutFreshPlan = 0.0;
+};
+
 /// Tuning for the real-time manager. The three time settings are in simulated
 /// seconds; the manager converts them to steps with the latest tick length.
 struct FleetManagerConfig {
@@ -83,6 +100,7 @@ struct FleetManagerConfig {
     double deadlockPatienceSeconds = 15.0;
     bool backgroundPlanning = true;
     bool passOrderEnabled = true;
+    bool diagnostics = false;
 };
 
 /// Keeps one fleet of robots serving a stream of orders in real time.
@@ -156,6 +174,14 @@ public:
 
     /// Returns the running throughput counters.
     [[nodiscard]] ThroughputStats throughput() const;
+
+    /// Returns the diagnostic counters collected since the manager was created.
+    /// The vectors are empty unless the config enabled diagnostics.
+    [[nodiscard]] ManagerDiagnostics diagnostics() const;
+
+    /// Returns one line per robot with its route index and the next few cells.
+    /// The liveness benchmark uses it to explain a stalled run.
+    [[nodiscard]] std::string routeDump() const;
 
     /// Returns and clears the order events since the last call.
     [[nodiscard]] std::vector<OrderEvent> drainEvents();

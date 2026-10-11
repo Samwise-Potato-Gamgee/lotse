@@ -114,6 +114,12 @@ struct FleetManager::Impl {
     bool started = false;
     ThroughputStats stats;
 
+    bool diagnosticsEnabled = false;
+    ManagerDiagnostics diag;
+    std::unordered_map<GridCell, std::vector<std::pair<int, int>>, GridCellHash> lastPlanCellOrder;
+    bool freshPlanPending = false;
+    long long freshPlanFailureStep = 0;
+
     std::thread worker;
     mutable std::mutex workMutex;
     std::condition_variable workCv;
@@ -135,10 +141,16 @@ struct FleetManager::Impl {
           clock(timeSource),
           config(managerConfig),
           fleetSize(robotSide.robotCount()),
-          backgroundPlanning(managerConfig.backgroundPlanning) {
+          backgroundPlanning(managerConfig.backgroundPlanning),
+          diagnosticsEnabled(managerConfig.diagnostics) {
         const std::vector<GridCell> starts = side.starts();
         if (static_cast<int>(starts.size()) != fleetSize) {
             throw std::runtime_error("fleet manager: starts do not match the fleet size");
+        }
+        if (diagnosticsEnabled) {
+            diag.cellOccupiedWaitSeconds.assign(static_cast<std::size_t>(fleetSize), 0.0);
+            diag.passOrderWaitSeconds.assign(static_cast<std::size_t>(fleetSize), 0.0);
+            diag.noWaypointSeconds.assign(static_cast<std::size_t>(fleetSize), 0.0);
         }
         routes.resize(static_cast<std::size_t>(fleetSize));
         index.assign(static_cast<std::size_t>(fleetSize), 0);
@@ -400,6 +412,85 @@ struct FleetManager::Impl {
         }
     }
 
+    /// Records a failed planning call and starts the no-fresh-plan gap timer.
+    void notePlanningFailure() {
+        ++stats.planningFailures;
+        if (diagnosticsEnabled) {
+            if (planner.lastCallTimedOut()) {
+                ++diag.planningTimeouts;
+            } else {
+                ++diag.planningRoutingFailures;
+            }
+            if (!freshPlanPending) {
+                freshPlanPending = true;
+                freshPlanFailureStep = step;
+            }
+        }
+        needsReplan = true;
+    }
+
+    /// Records an adopted plan and closes the no-fresh-plan gap timer.
+    void notePlanAdopted() {
+        ++stats.planAdoptions;
+        if (diagnosticsEnabled && freshPlanPending) {
+            const double gap = static_cast<double>(step - freshPlanFailureStep) * tickSeconds;
+            diag.secondsWithoutFreshPlan += gap;
+            diag.maxSecondsWithoutFreshPlan = std::max(diag.maxSecondsWithoutFreshPlan, gap);
+            freshPlanPending = false;
+        }
+    }
+
+    /// Compares the right of way at every cell shared by two robots with the
+    /// previous adopted plan, and counts how often a pair swaps order.
+    void analyzeRightOfWay() {
+        std::unordered_map<GridCell, std::vector<std::pair<int, int>>, GridCellHash> current;
+        for (int robot = 0; robot < fleetSize; ++robot) {
+            const auto slot = static_cast<std::size_t>(robot);
+            const Route& route = routes[slot];
+            std::unordered_map<GridCell, int, GridCellHash> firstVisit;
+            for (int time = 0; time <= route.steps(); ++time) {
+                firstVisit.try_emplace(route.cellAt(time), time);
+            }
+            for (const auto& [cell, time] : firstVisit) {
+                current[cell].emplace_back(robot, time);
+            }
+        }
+        for (const auto& [cell, visits] : current) {
+            if (visits.size() < 2) {
+                continue;
+            }
+            const auto previous = lastPlanCellOrder.find(cell);
+            if (previous == lastPlanCellOrder.end() || previous->second.size() < 2) {
+                continue;
+            }
+            for (std::size_t i = 0; i < visits.size(); ++i) {
+                for (std::size_t j = i + 1; j < visits.size(); ++j) {
+                    int leftOld = -1;
+                    int rightOld = -1;
+                    for (const auto& [oldRobot, oldTime] : previous->second) {
+                        if (oldRobot == visits[i].first) {
+                            leftOld = oldTime;
+                        }
+                        if (oldRobot == visits[j].first) {
+                            rightOld = oldTime;
+                        }
+                    }
+                    if (leftOld < 0 || rightOld < 0) {
+                        continue;
+                    }
+                    const int before =
+                        visits[i].second < visits[j].second ? visits[i].first : visits[j].first;
+                    const int oldBefore = leftOld < rightOld ? visits[i].first : visits[j].first;
+                    ++diag.rightOfWayComparisons;
+                    if (before != oldBefore) {
+                        ++diag.rightOfWayFlips;
+                    }
+                }
+            }
+        }
+        lastPlanCellOrder = std::move(current);
+    }
+
     /// Starts a background planning call when the window has elapsed.
     void maybeRequestPlan() {
         if (!needsReplan && stepsSincePlan < stepsFor(config.windowSeconds)) {
@@ -437,12 +528,11 @@ struct FleetManager::Impl {
             planned = fallback->plan(job.map, job.agents);
         }
         if (!planned.has_value()) {
-            ++stats.planningFailures;
-            needsReplan = true;
+            notePlanningFailure();
             return;
         }
         if (adoptPlan(*planned, robotIds)) {
-            ++stats.planAdoptions;
+            notePlanAdopted();
         } else {
             ++stats.planRejections;
             needsReplan = true;
@@ -501,6 +591,9 @@ struct FleetManager::Impl {
         index = std::move(newIndex);
         targetIndex = std::move(newTarget);
         schedule = buildCellSchedule(routes);
+        if (diagnosticsEnabled) {
+            analyzeRightOfWay();
+        }
         return true;
     }
 
@@ -519,12 +612,11 @@ struct FleetManager::Impl {
             robotIds = requestIds;
         }
         if (!planned.has_value()) {
-            ++stats.planningFailures;
-            needsReplan = true;
+            notePlanningFailure();
             return;
         }
         if (adoptPlan(planned.value(), robotIds)) {
-            ++stats.planAdoptions;
+            notePlanAdopted();
         } else {
             ++stats.planRejections;
             needsReplan = true;
@@ -614,6 +706,7 @@ struct FleetManager::Impl {
         std::vector<int> currentIndex(static_cast<std::size_t>(fleetSize));
         std::vector<int> nextIndex(static_cast<std::size_t>(fleetSize));
         std::vector<bool> advancing(static_cast<std::size_t>(fleetSize), false);
+        std::vector<int> holdReason(static_cast<std::size_t>(fleetSize), 0);
         for (int robot = 0; robot < fleetSize; ++robot) {
             const auto slot = static_cast<std::size_t>(robot);
             currentIndex[slot] = index[slot];
@@ -638,13 +731,33 @@ struct FleetManager::Impl {
                         continue;
                     }
                     const GridCell target = routes[slot].cellAt(nextIndex[slot]);
-                    if (cellOccupiedByOther(robot, target) ||
+                    const bool occupied = cellOccupiedByOther(robot, target);
+                    const bool passOrderRefused =
+                        !occupied &&
                         !passOrderAllows(robot, target, nextIndex[slot], currentIndex, nextIndex,
-                                         advancing, routes, schedule, false)) {
+                                         advancing, routes, schedule, false);
+                    if (occupied || passOrderRefused) {
+                        holdReason[slot] = occupied ? 1 : 2;
                         nextIndex[slot] = currentIndex[slot];
                         advancing[slot] = false;
                         changed = true;
                     }
+                }
+            }
+        }
+
+        if (diagnosticsEnabled) {
+            for (int robot = 0; robot < fleetSize; ++robot) {
+                const auto slot = static_cast<std::size_t>(robot);
+                if (moving[slot]) {
+                    continue;
+                }
+                if (holdReason[slot] == 1) {
+                    diag.cellOccupiedWaitSeconds[slot] += tickSeconds;
+                } else if (holdReason[slot] == 2) {
+                    diag.passOrderWaitSeconds[slot] += tickSeconds;
+                } else if (!advancing[slot]) {
+                    diag.noWaypointSeconds[slot] += tickSeconds;
                 }
             }
         }
@@ -892,6 +1005,29 @@ ThroughputStats FleetManager::throughput() const {
         }
     }
     return stats;
+}
+
+ManagerDiagnostics FleetManager::diagnostics() const {
+    const std::lock_guard<std::mutex> lock(impl_->mutex);
+    return impl_->diag;
+}
+
+std::string FleetManager::routeDump() const {
+    const std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::ostringstream out;
+    for (int robot = 0; robot < impl_->fleetSize; ++robot) {
+        const auto slot = static_cast<std::size_t>(robot);
+        const Route& route = impl_->routes[slot];
+        out << "r" << robot << " idx=" << impl_->index[slot] << " tgt=" << impl_->targetIndex[slot]
+            << " moving=" << (impl_->moving[slot] ? 1 : 0) << " steps=" << route.steps()
+            << " route=";
+        const int limit = std::min(route.steps(), 14);
+        for (int time = 0; time <= limit; ++time) {
+            out << '(' << route.cellAt(time).x << ',' << route.cellAt(time).y << ')';
+        }
+        out << ';';
+    }
+    return out.str();
 }
 
 std::vector<OrderEvent> FleetManager::drainEvents() {
