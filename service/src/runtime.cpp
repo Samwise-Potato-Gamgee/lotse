@@ -127,18 +127,18 @@ struct Runtime::Impl {
             planner = std::make_unique<core::CbsPlanner>(
                 core::CbsOptions{config.planTimeLimitMs, 0, horizon});
             fallback = std::make_unique<core::PrioritizedPlanner>(core::PrioritizedOptions{
-                core::AgentOrder::FarthestFirst, 0, horizon, 8, config.planTimeLimitMs});
+                core::AgentOrder::FarthestFirst, 0, horizon, 8, config.planTimeLimitMs, true});
         } else if (config.planner == "prioritized") {
             planner = std::make_unique<core::PrioritizedPlanner>(core::PrioritizedOptions{
-                core::AgentOrder::FarthestFirst, 0, horizon, 8, config.planTimeLimitMs});
+                core::AgentOrder::FarthestFirst, 0, horizon, 8, config.planTimeLimitMs, true});
         } else {
             throw std::runtime_error("service: unknown planner " + config.planner);
         }
         core::FleetManagerConfig managerConfig;
-        managerConfig.windowSteps = config.replanWindowSteps;
+        managerConfig.windowSeconds = config.replanWindowSeconds;
         managerConfig.planTimeLimitMs = config.planTimeLimitMs;
-        managerConfig.priorityAgeingInterval = config.priorityAgeingInterval;
-        managerConfig.deadlockPatience = config.deadlockPatience;
+        managerConfig.priorityAgeingSeconds = config.priorityAgeingSeconds;
+        managerConfig.deadlockPatienceSeconds = config.deadlockPatienceSeconds;
         managerConfig.backgroundPlanning = config.backgroundPlanning;
         managerConfig.passOrderEnabled = config.passOrder;
         manager = std::make_unique<core::FleetManager>(map, side, *planner, assigner, clock,

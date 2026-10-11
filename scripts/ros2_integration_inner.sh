@@ -27,7 +27,7 @@ mkdir -p results
 : > "${RAW}"
 echo "setup,map,fleet,seed,obstacle,order_count,completed,contacts,min_distance,deadlocked,grid_collisions,plan_adoptions,plan_rejections,robots_used,stopped_frames,status" >> "${RAW}"
 
-MAX_PARALLEL="${LOTSE_ROS_PARALLEL:-3}"
+MAX_PARALLEL="${LOTSE_ROS_PARALLEL:-1}"
 DOMAIN_BASE="${LOTSE_ROS_DOMAIN_BASE:-40}"
 SEEDS="${LOTSE_ROS_SEEDS:-10}"
 SKIP_LARGE="${LOTSE_ROS_SKIP_LARGE:-0}"
@@ -66,11 +66,14 @@ runCase() {
     if [[ "${obstacle}" == "yes" ]]; then
         extra="obstacle_robot:=0 obstacle_start:=4.0 obstacle_end:=9.0"
     fi
+    # The stand-in runs at time_scale 3.0, so a wall budget is three times as
+    # many simulated seconds; the manager's timeout now counts simulated time.
+    local sim_timeout=$((run_timeout * 3))
     ROS_DOMAIN_ID="${domain}" timeout "$((run_timeout + 60))" \
         ros2 launch lotse_ros warehouse.launch.py \
         map_path:="${map}" fleet_size:="${fleet}" seed:="${seed}" \
         slowdown_probability:=0.15 stop_probability:=0.01 time_scale:=3.0 \
-        order_count:="${order_count}" timeout_seconds:="${run_timeout}" \
+        order_count:="${order_count}" timeout_seconds:="${sim_timeout}" \
         result_dir:="${dir}" ${extra} > "${dir}/launch.log" 2>&1 || true
 
     if [[ ! -f "${dir}/fleet.json" || ! -f "${dir}/judge.json" ]]; then
@@ -138,7 +141,7 @@ if [[ "${AGGREGATE_ONLY}" != "1" ]]; then
     done
     if [[ "${SKIP_LARGE}" == "0" ]]; then
         for seed in $(seq 1 "${SEEDS}"); do
-            startJob large-10 maps/warehouse_large.map 10 "${seed}" no 30 900
+            startJob large-10 maps/warehouse_large.map 10 "${seed}" no 30 1200
         done
         startJob obstacle maps/warehouse_large.map 4 1 yes 12 500
     fi
@@ -170,10 +173,11 @@ for dir in .build/ros2/case-*/; do
 done
 
 {
-    echo "Stage 6 ROS 2 integration matrix"
+    echo "ROS 2 integration matrix"
     echo "Command: ./scripts/run_ros2_integration.sh"
     echo "Slowdown probability 0.15, stop probability 0.01, time_scale 3.0."
     echo "Safety is the judge's contact count from true positions."
+    echo "Run budgets are simulated seconds; the manager follows the stand-in /clock."
     echo
     printf '%-12s %5s %6s %7s %9s %10s %8s %9s %9s %11s %9s %8s\n' \
         "setup" "runs" "orders" "ok" "contacts" "deadlocks" "closest" "grid" "adopted" \

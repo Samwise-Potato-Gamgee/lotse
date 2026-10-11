@@ -1,0 +1,12 @@
+A1 clock test: one seeded scenario at two time scales
+Command: ./scripts/clock_test.sh
+Scenario: warehouse_small, 4 robots, seed 7, 12 orders,
+slowdown 0.15, stop 0.01. Simulated time comes from the stand-in /clock.
+
+time_scale  completed contacts deadlocks  grid  steps    sim_sec     wall_sec
+1.0                12        0     false     0   4759        238      238.003
+4.0                12        0     false     0   4822      241.1      60.2767
+
+simulated seconds: 238 (1.0x) vs 241.1 (4.0x); grid steps: 4759 vs 4822
+agreement tolerance: 2 percent of simulated time
+PASS: the same seeded scenario completes with the same outcome in simulated time.

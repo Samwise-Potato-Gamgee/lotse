@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstddef>
 #include <mutex>
@@ -107,6 +108,7 @@ struct FleetManager::Impl {
     int stagnantSteps = 0;
     bool deadlock = false;
     bool backgroundPlanning = true;
+    double tickSeconds = 1.0;
 
     std::chrono::steady_clock::time_point startedAt;
     bool started = false;
@@ -266,6 +268,16 @@ struct FleetManager::Impl {
         pendingEvents.push_back(OrderEvent{order.order.id, state, order.robot, order.updatedMs});
     }
 
+    /// Converts a duration in simulated seconds to whole manager ticks.
+    /// @param seconds the duration to convert
+    [[nodiscard]] int stepsFor(double seconds) const {
+        if (tickSeconds <= 0.0) {
+            return 1;
+        }
+        const long long steps = std::llround(seconds / tickSeconds);
+        return static_cast<int>(steps < 1 ? 1 : steps);
+    }
+
     /// Returns true when no other robot is on or heading for a cell. Used to
     /// keep two robots from claiming the same station cell at once.
     /// @param cell the station cell to test
@@ -322,7 +334,7 @@ struct FleetManager::Impl {
                 order.push_back(slot);
             }
         }
-        const int ageing = config.priorityAgeingInterval;
+        const int ageing = stepsFor(config.priorityAgeingSeconds);
         std::sort(order.begin(), order.end(), [this, ageing](std::size_t lhs, std::size_t rhs) {
             const long long left = effectivePriority(orders[lhs].order, step, ageing);
             const long long right = effectivePriority(orders[rhs].order, step, ageing);
@@ -390,7 +402,7 @@ struct FleetManager::Impl {
 
     /// Starts a background planning call when the window has elapsed.
     void maybeRequestPlan() {
-        if (!needsReplan && stepsSincePlan < config.windowSteps) {
+        if (!needsReplan && stepsSincePlan < stepsFor(config.windowSeconds)) {
             return;
         }
         if (step - lastPlanStep < 1) {
@@ -576,9 +588,9 @@ struct FleetManager::Impl {
         }
     }
 
-    /// Returns true when another robot physically occupies a cell, counting both
-    /// the cell it fully occupies and the cell a moving robot is committed to
-    /// enter. This is the gate that keeps two robots out of the same grid cell.
+    /// Returns true when another robot physically occupies a cell or is already
+    /// committed to enter it. This is the safety half of the entry gate: it
+    /// keeps two bodies out of one cell even if a plan is adopted mid-move.
     /// @param mover the robot asking for the cell
     /// @param cell the cell being entered
     [[nodiscard]] bool cellOccupiedByOther(int mover, GridCell cell) const {
@@ -691,6 +703,7 @@ struct FleetManager::Impl {
     /// Runs one grid step.
     /// @param seconds how much simulated time this step covers
     void tick(double seconds) {
+        tickSeconds = seconds;
         assignOrders();
         maybeRequestPlan();
         if (backgroundPlanning) {
@@ -711,7 +724,7 @@ struct FleetManager::Impl {
         } else {
             stagnantSteps = 0;
         }
-        deadlock = stagnantSteps >= config.deadlockPatience;
+        deadlock = stagnantSteps >= stepsFor(config.deadlockPatienceSeconds);
         stats.steps = step;
 
         if (started) {

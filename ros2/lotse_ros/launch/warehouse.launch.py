@@ -24,6 +24,7 @@ def _make_nodes(context):
     obstacle_robot = int(LaunchConfiguration('obstacle_robot').perform(context))
     obstacle_start = float(LaunchConfiguration('obstacle_start').perform(context))
     obstacle_end = float(LaunchConfiguration('obstacle_end').perform(context))
+    use_sim_time = LaunchConfiguration('use_sim_time').perform(context).lower() == 'true'
 
     namespaces = ['robot_' + str(robot) for robot in range(fleet_size)]
     nodes = [
@@ -56,13 +57,14 @@ def _make_nodes(context):
             name='driver',
             namespace=namespaces[robot],
             parameters=[{
+                'use_sim_time': use_sim_time,
                 'cell_size': cell_size,
                 'stop_distance': 0.5,
                 'max_speed': 0.8,
                 'turn_gain': 2.0,
                 'turn_limit': 1.6,
                 'goal_tolerance': 0.06,
-                'control_rate_hz': 60.0,
+                'control_rate_hz': 20.0,
             }],
             output='screen',
         ))
@@ -71,6 +73,7 @@ def _make_nodes(context):
         executable='judge_node',
         name='judge_node',
         parameters=[{
+            'use_sim_time': use_sim_time,
             'namespaces': namespaces,
             'robot_radius': 0.25,
             'result_path': result_dir + '/judge.json',
@@ -83,6 +86,7 @@ def _make_nodes(context):
         executable='fleet_node',
         name='fleet_node',
         parameters=[{
+            'use_sim_time': use_sim_time,
             'map_path': map_path,
             'fleet_size': fleet_size,
             'cell_size': cell_size,
@@ -91,8 +95,9 @@ def _make_nodes(context):
             'arrival_interval': 10,
             'seed': seed,
             'plan_time_limit_ms': 500,
-            'window_steps': 40,
-            'deadlock_patience': 3000,
+            'replan_window_seconds': 6.0,
+            'priority_ageing_seconds': 3.75,
+            'deadlock_patience_seconds': 450.0,
             'result_path': result_dir + '/fleet.json',
             'timeout_seconds': timeout,
         }],
@@ -114,6 +119,7 @@ def generate_launch_description():
         DeclareLaunchArgument('order_count', default_value='20'),
         DeclareLaunchArgument('timeout_seconds', default_value='200.0'),
         DeclareLaunchArgument('result_dir', default_value='/tmp/lotse-ros'),
+        DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('obstacle_robot', default_value='-1'),
         DeclareLaunchArgument('obstacle_start', default_value='-1.0'),
         DeclareLaunchArgument('obstacle_end', default_value='-1.0'),

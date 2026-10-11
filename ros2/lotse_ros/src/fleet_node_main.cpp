@@ -22,6 +22,7 @@
 #include "lotse/core/prioritized_planner.hpp"
 #include "lotse/core/task_assigner.hpp"
 
+#include "lotse_ros/ros_clock.hpp"
 #include "lotse_ros/ros_robot_side.hpp"
 
 namespace {
@@ -33,17 +34,19 @@ public:
         const std::string map_path = declare_parameter<std::string>("map_path", "");
         fleet_size_ = static_cast<int>(declare_parameter<std::int64_t>("fleet_size", 4));
         cell_size_ = declare_parameter<double>("cell_size", 1.0);
-        const double tick_hz = declare_parameter<double>("tick_hz", 20.0);
+        tick_hz_ = declare_parameter<double>("tick_hz", 20.0);
         order_count_ = static_cast<int>(declare_parameter<std::int64_t>("order_count", 20));
         const int arrival_interval =
             static_cast<int>(declare_parameter<std::int64_t>("arrival_interval", 10));
         const int seed = static_cast<int>(declare_parameter<std::int64_t>("seed", 1));
         const int plan_time_limit_ms =
             static_cast<int>(declare_parameter<std::int64_t>("plan_time_limit_ms", 500));
-        const int window_steps =
-            static_cast<int>(declare_parameter<std::int64_t>("window_steps", 40));
-        const int deadlock_patience =
-            static_cast<int>(declare_parameter<std::int64_t>("deadlock_patience", 3000));
+        const double replan_window_seconds =
+            declare_parameter<double>("replan_window_seconds", 6.0);
+        const double priority_ageing_seconds =
+            declare_parameter<double>("priority_ageing_seconds", 3.75);
+        const double deadlock_patience_seconds =
+            declare_parameter<double>("deadlock_patience_seconds", 450.0);
         result_path_ = declare_parameter<std::string>("result_path", "/tmp/lotse-fleet.json");
         timeout_seconds_ = declare_parameter<double>("timeout_seconds", 240.0);
 
@@ -65,12 +68,12 @@ public:
         side_ = std::make_unique<lotse::ros::RosRobotSide>(*this, namespaces, starts, cell_size_);
         planner_ =
             std::make_unique<lotse::core::PrioritizedPlanner>(lotse::core::PrioritizedOptions{
-                lotse::core::AgentOrder::FarthestFirst, 0, 0, 8, plan_time_limit_ms});
+                lotse::core::AgentOrder::FarthestFirst, 0, 0, 8, plan_time_limit_ms, true});
         lotse::core::FleetManagerConfig config;
-        config.windowSteps = window_steps;
+        config.windowSeconds = replan_window_seconds;
         config.planTimeLimitMs = plan_time_limit_ms;
-        config.priorityAgeingInterval = 25;
-        config.deadlockPatience = deadlock_patience;
+        config.priorityAgeingSeconds = priority_ageing_seconds;
+        config.deadlockPatienceSeconds = deadlock_patience_seconds;
         config.backgroundPlanning = true;
         config.passOrderEnabled = true;
         manager_ = std::make_unique<lotse::core::FleetManager>(map_, *side_, *planner_, assigner_,
@@ -78,11 +81,12 @@ public:
 
         const lotse::core::OrderGeneratorOptions options{order_count_, 0, arrival_interval, 2, 3};
         orders_ = lotse::core::generateOrders(map_, options, static_cast<std::uint32_t>(seed));
-        start_time_ = std::chrono::steady_clock::now();
+        start_time_ = clock_.now();
+        wall_start_ = std::chrono::steady_clock::now();
 
         const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::duration<double>(1.0 / (tick_hz > 1.0 ? tick_hz : 1.0)));
-        timer_ = create_wall_timer(period, [this] { tick(); });
+            std::chrono::duration<double>(1.0 / (tick_hz_ > 1.0 ? tick_hz_ : 1.0)));
+        timer_ = create_timer(period, [this] { tick(); });
     }
 
 private:
@@ -94,7 +98,7 @@ private:
             manager_->submitOrder(order.pickup, order.dropoff, order.priority);
             ++next_order_;
         }
-        manager_->tick(1.0);
+        manager_->tick(1.0 / (tick_hz_ > 1.0 ? tick_hz_ : 1.0));
         for (const lotse::core::RobotStatus& status : manager_->robotStatuses()) {
             if (status.stopped) {
                 ++stopped_frames_;
@@ -106,28 +110,32 @@ private:
             finish();
             return;
         }
-        const double elapsed =
-            std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time_).count();
+        const double elapsed = simulatedSeconds();
         if (elapsed > timeout_seconds_) {
             finish();
             return;
         }
         if (step_ % 40 == 0) {
-            writeResult(elapsed);
+            writeResult();
         }
+    }
+
+    /// Returns the simulated seconds since the first order was submitted.
+    [[nodiscard]] double simulatedSeconds() const {
+        return std::chrono::duration<double>(clock_.now() - start_time_).count();
     }
 
     /// Writes the result file and stops the launch.
     void finish() {
-        const double elapsed =
-            std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time_).count();
-        writeResult(elapsed);
+        writeResult();
         rclcpp::shutdown();
     }
 
     /// Writes the counters as one JSON object.
-    /// @param elapsed wall seconds since startup
-    void writeResult(double elapsed) {
+    void writeResult() {
+        const double simSeconds = simulatedSeconds();
+        const double wallSeconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start_).count();
         const lotse::core::ThroughputStats stats = manager_->throughput();
         const lotse::judge::Report report = manager_->safetyReport();
         std::vector<bool> robotUsed(static_cast<std::size_t>(fleet_size_), false);
@@ -142,6 +150,18 @@ private:
                 ++robotsUsed;
             }
         }
+        int ordersPending = 0;
+        int ordersAssigned = 0;
+        int ordersInProgress = 0;
+        for (const lotse::core::ManagedOrder& order : manager_->orders()) {
+            if (order.state == lotse::core::OrderState::Pending) {
+                ++ordersPending;
+            } else if (order.state == lotse::core::OrderState::Assigned) {
+                ++ordersAssigned;
+            } else if (order.state == lotse::core::OrderState::InProgress) {
+                ++ordersInProgress;
+            }
+        }
         std::ofstream file(result_path_);
         if (!file) {
             return;
@@ -152,13 +172,16 @@ private:
              << ",\"deadlocked\":" << (manager_->deadlocked() ? "true" : "false")
              << ",\"collisions\":" << report.collisions << ",\"swaps\":" << report.swaps
              << ",\"steps\":" << stats.steps << ",\"stopped_frames\":" << stopped_frames_
-             << ",\"wall_seconds\":" << elapsed << ",\"planning_calls\":" << stats.planningCalls
+             << ",\"sim_seconds\":" << simSeconds << ",\"wall_seconds\":" << wallSeconds
+             << ",\"planning_calls\":" << stats.planningCalls
              << ",\"planning_failures\":" << stats.planningFailures
              << ",\"plan_adoptions\":" << stats.planAdoptions
              << ",\"plan_rejections\":" << stats.planRejections << ",\"robots_used\":" << robotsUsed
-             << "}";
+             << ",\"orders_pending\":" << ordersPending << ",\"orders_assigned\":" << ordersAssigned
+             << ",\"orders_in_progress\":" << ordersInProgress << "}";
     }
 
+    double tick_hz_ = 20.0;
     int fleet_size_ = 4;
     double cell_size_ = 1.0;
     int order_count_ = 20;
@@ -169,13 +192,14 @@ private:
     std::unique_ptr<lotse::ros::RosRobotSide> side_;
     lotse::core::NearestRobotAssigner assigner_;
     std::unique_ptr<lotse::core::PrioritizedPlanner> planner_;
-    lotse::core::SteadyClock clock_;
+    lotse::ros::RosClock clock_{get_clock()};
     std::unique_ptr<lotse::core::FleetManager> manager_;
     std::vector<lotse::core::Order> orders_;
     std::size_t next_order_ = 0;
     int step_ = 0;
     long long stopped_frames_ = 0;
     std::chrono::steady_clock::time_point start_time_;
+    std::chrono::steady_clock::time_point wall_start_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 

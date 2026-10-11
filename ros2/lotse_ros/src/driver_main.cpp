@@ -49,7 +49,7 @@ public:
 
         const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::duration<double>(1.0 / std::max(rate, 1.0)));
-        control_timer_ = create_wall_timer(period, [this] { control(); });
+        control_timer_ = create_timer(period, [this] { control(); });
     }
 
 private:

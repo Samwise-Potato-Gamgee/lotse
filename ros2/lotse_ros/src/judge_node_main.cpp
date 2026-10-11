@@ -39,7 +39,7 @@ public:
 
         const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::duration<double>(1.0 / (rate > 1.0 ? rate : 1.0)));
-        timer_ = create_wall_timer(period, [this] { check(); });
+        timer_ = create_timer(period, [this] { check(); });
         rclcpp::on_shutdown([this] { writeResult(); });
     }
 

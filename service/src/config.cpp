@@ -105,9 +105,9 @@ ServiceConfig loadConfig(const std::string& path) {
                                                                 {"tick_rate_hz", true},
                                                                 {"sim_seconds_per_tick", true},
                                                                 {"plan_time_limit_ms", true},
-                                                                {"replan_window_steps", true},
-                                                                {"priority_ageing_interval", true},
-                                                                {"deadlock_patience", true},
+                                                                {"replan_window_seconds", true},
+                                                                {"priority_ageing_seconds", true},
+                                                                {"deadlock_patience_seconds", true},
                                                                 {"background_planning", true},
                                                                 {"pass_order", true},
                                                                 {"slowdown_probability", true},
@@ -182,14 +182,14 @@ ServiceConfig loadConfig(const std::string& path) {
     if (const auto value = find(values, "plan_time_limit_ms")) {
         config.planTimeLimitMs = parseInt(*value, "plan_time_limit_ms");
     }
-    if (const auto value = find(values, "replan_window_steps")) {
-        config.replanWindowSteps = parseInt(*value, "replan_window_steps");
+    if (const auto value = find(values, "replan_window_seconds")) {
+        config.replanWindowSeconds = parseDouble(*value, "replan_window_seconds");
     }
-    if (const auto value = find(values, "priority_ageing_interval")) {
-        config.priorityAgeingInterval = parseInt(*value, "priority_ageing_interval");
+    if (const auto value = find(values, "priority_ageing_seconds")) {
+        config.priorityAgeingSeconds = parseDouble(*value, "priority_ageing_seconds");
     }
-    if (const auto value = find(values, "deadlock_patience")) {
-        config.deadlockPatience = parseInt(*value, "deadlock_patience");
+    if (const auto value = find(values, "deadlock_patience_seconds")) {
+        config.deadlockPatienceSeconds = parseDouble(*value, "deadlock_patience_seconds");
     }
     if (const auto value = find(values, "background_planning")) {
         config.backgroundPlanning = parseBool(*value, "background_planning");

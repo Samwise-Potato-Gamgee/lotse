@@ -8,4 +8,6 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 lotse::build_image
-lotse::run bash -lc './scripts/ros2_integration_inner.sh'
+mapfile -d '' -t args < <(lotse::_docker_args)
+docker run --rm --env "LOTSE_ROS_SKIP_LARGE=${LOTSE_ROS_SKIP_LARGE:-0}" \
+    "${args[@]}" "${LOTSE_DEV_IMAGE}" bash -lc './scripts/ros2_integration_inner.sh'

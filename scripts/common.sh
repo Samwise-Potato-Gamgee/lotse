@@ -36,6 +36,14 @@ lotse::run() {
     docker run --rm "${args[@]}" "${LOTSE_DEV_IMAGE}" "$@"
 }
 
+# Runs a command in the development image on the host network, so ROS 2 nodes
+# in the Isaac Sim container can exchange messages with it.
+lotse::run_host() {
+    local -a args
+    mapfile -d '' args < <(lotse::_docker_args)
+    docker run --rm --network host "${args[@]}" "${LOTSE_DEV_IMAGE}" "$@"
+}
+
 # Same as lotse::run, but with Docker's seccomp profile relaxed. ThreadSanitizer
 # calls personality(ADDR_NO_RANDOMIZE), which the default profile blocks, so the
 # TSan binary otherwise dies with a CHECK failure. Test containers only.

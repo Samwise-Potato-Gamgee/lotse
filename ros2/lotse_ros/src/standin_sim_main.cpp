@@ -2,7 +2,7 @@
 // velocity commands on <ns>/cmd_vel and publishes true positions on
 // <ns>/odom and <ns>/ground_truth plus a three-beam LiDAR on <ns>/scan. Seeded
 // slowdowns and stops inject delays, time_scale runs it faster than real time,
-// and one robot can be given a short-lived obstacle in front.
+// it publishes /clock, and one robot can be given a short-lived obstacle.
 
 #include <chrono>
 #include <cmath>
@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include <builtin_interfaces/msg/time.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -22,6 +23,7 @@
 #include "lotse/core/geometry.hpp"
 #include "lotse/core/map.hpp"
 
+#include <rosgraph_msgs/msg/clock.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 
 namespace {
@@ -76,8 +78,11 @@ public:
                 create_publisher<sensor_msgs::msg::LaserScan>(name + "/scan", 10));
         }
 
+        clock_publisher_ =
+            create_publisher<rosgraph_msgs::msg::Clock>("/clock", rclcpp::ClockQoS());
+        const double wall_rate = std::max(rate_hz_ * std::max(time_scale_, 0.001), 1.0);
         const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::duration<double>(1.0 / std::max(rate_hz_, 1.0)));
+            std::chrono::duration<double>(1.0 / wall_rate));
         step_timer_ = create_wall_timer(period, [this] { step(); });
     }
 
@@ -92,8 +97,9 @@ private:
 
     /// Advances every robot by one time slice and publishes its state.
     void step() {
-        const double dt = time_scale_ / std::max(rate_hz_, 1.0);
+        const double dt = 1.0 / std::max(rate_hz_, 1.0);
         elapsed_ += dt;
+        publishClock();
         for (std::size_t index = 0; index < robots_.size(); ++index) {
             Robot& robot = robots_[index];
             updateDelay(robot, dt);
@@ -131,7 +137,7 @@ private:
         const auto slot = static_cast<std::size_t>(robot);
         nav_msgs::msg::Odometry message;
         message.header.frame_id = "map";
-        message.header.stamp = now();
+        message.header.stamp = simStamp();
         message.child_frame_id = "base_link";
         message.pose.pose.position.x = state.pose.x;
         message.pose.pose.position.y = state.pose.y;
@@ -169,12 +175,30 @@ private:
     double obstacle_distance_ = 0.35;
     double elapsed_ = 0.0;
 
+    /// Builds a stamp from the simulator's elapsed time.
+    [[nodiscard]] builtin_interfaces::msg::Time simStamp() const {
+        const auto total = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::duration<double>(elapsed_));
+        builtin_interfaces::msg::Time stamp;
+        stamp.sec = static_cast<std::int32_t>(total.count() / 1000000000);
+        stamp.nanosec = static_cast<std::uint32_t>(total.count() % 1000000000);
+        return stamp;
+    }
+
+    /// Publishes the simulator's clock so use_sim_time nodes follow it.
+    void publishClock() {
+        rosgraph_msgs::msg::Clock message;
+        message.clock = simStamp();
+        clock_publisher_->publish(message);
+    }
+
     std::mt19937 random_;
     std::vector<Robot> robots_;
     std::vector<rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr> command_subscriptions_;
     std::vector<rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr> odom_publishers_;
     std::vector<rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr> truth_publishers_;
     std::vector<rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr> scan_publishers_;
+    rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_publisher_;
     rclcpp::TimerBase::SharedPtr step_timer_;
 };
 

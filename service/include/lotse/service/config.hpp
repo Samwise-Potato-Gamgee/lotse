@@ -21,9 +21,9 @@ struct ServiceConfig {
     double tickRateHz = 10.0;
     double simSecondsPerTick = 1.0;
     int planTimeLimitMs = 500;
-    int replanWindowSteps = 40;
-    int priorityAgeingInterval = 25;
-    int deadlockPatience = 300;
+    double replanWindowSeconds = 8.0;
+    double priorityAgeingSeconds = 5.0;
+    double deadlockPatienceSeconds = 40.0;
     bool backgroundPlanning = true;
     bool passOrder = true;
     double slowdownProbability = 0.0;

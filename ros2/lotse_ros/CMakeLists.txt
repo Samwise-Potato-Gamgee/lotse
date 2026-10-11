@@ -15,6 +15,7 @@ find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(rosgraph_msgs REQUIRED)
 
 if(NOT TARGET lotse_project_warnings)
     add_library(lotse_project_warnings INTERFACE)
@@ -25,7 +26,7 @@ endif()
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../core
     ${CMAKE_CURRENT_BINARY_DIR}/lotse_core)
 
-set(LOTSE_ROS_MSG_DEPS rclcpp std_msgs nav_msgs sensor_msgs geometry_msgs)
+set(LOTSE_ROS_MSG_DEPS rclcpp std_msgs nav_msgs sensor_msgs geometry_msgs rosgraph_msgs)
 
 add_library(lotse_ros_side src/ros_robot_side.cpp)
 target_include_directories(lotse_ros_side PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

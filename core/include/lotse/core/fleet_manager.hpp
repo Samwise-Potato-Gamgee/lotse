@@ -74,12 +74,13 @@ struct ThroughputStats {
     int planRejections = 0;
 };
 
-/// Tuning for the real-time manager.
+/// Tuning for the real-time manager. The three time settings are in simulated
+/// seconds; the manager converts them to steps with the latest tick length.
 struct FleetManagerConfig {
-    int windowSteps = 40;
+    double windowSeconds = 2.0;
     int planTimeLimitMs = 500;
-    int priorityAgeingInterval = 25;
-    int deadlockPatience = 300;
+    double priorityAgeingSeconds = 1.25;
+    double deadlockPatienceSeconds = 15.0;
     bool backgroundPlanning = true;
     bool passOrderEnabled = true;
 };

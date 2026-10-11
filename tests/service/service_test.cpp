@@ -212,7 +212,7 @@ TEST(FleetManagerTest, CompletesOrdersWithZeroCollisions) {
     NearestRobotAssigner assigner;
     FleetManagerConfig config;
     config.backgroundPlanning = false;
-    config.windowSteps = 20;
+    config.windowSeconds = 20.0;
     FleetManager manager(map, side, planner, assigner, clock, config);
     manager.setBackgroundPlanning(false);
 
@@ -270,7 +270,7 @@ TEST(FleetManagerTest, AdoptionWhileBetweenCellsKeepsOneRobotPerCell) {
     NearestRobotAssigner assigner;
     FleetManagerConfig config;
     config.backgroundPlanning = false;
-    config.windowSteps = 1;
+    config.windowSeconds = 1.0;
     FleetManager manager(map, side, planner, assigner, clock, config);
     manager.setBackgroundPlanning(false);
 
