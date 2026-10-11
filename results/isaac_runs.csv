@@ -1,0 +1,5 @@
+run,seed,obstacle,orders,completed,judge_contacts,sim_contacts,deadlocked,grid,min_distance,sim_seconds,wall_seconds,stopped_frames,status
+seed1,1,no,12,12,0,0,false,0,0.9229,227.4,1411.94,0,ok
+seed2,2,no,12,12,0,0,false,0,0.9545,254.267,209.645,0,ok
+seed3,3,no,12,12,0,0,false,0,0.9773,269.683,254.768,0,ok
+obstacle,1,yes,12,12,0,0,false,0,0.9613,246.167,288.006,188,ok
