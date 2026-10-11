@@ -205,6 +205,11 @@ done
         }
     }' "${RAW}" | sort
     echo
+    echo "runs that did not finish every order:"
+    awk -F, 'NR > 1 && $16 != "ok" {
+        print "  " $1 " seed " $4 ": " $7 "/" $6 " orders, contacts " $8 ", deadlocked " $10 ", grid " $11
+    }' "${RAW}"
+    echo
     echo "per-run detail:"
     cat "${RAW}"
 } > "${OUT}"
