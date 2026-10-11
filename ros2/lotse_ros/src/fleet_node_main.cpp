@@ -68,7 +68,8 @@ public:
         side_ = std::make_unique<lotse::ros::RosRobotSide>(*this, namespaces, starts, cell_size_);
         planner_ =
             std::make_unique<lotse::core::PrioritizedPlanner>(lotse::core::PrioritizedOptions{
-                lotse::core::AgentOrder::FarthestFirst, 0, 0, 8, plan_time_limit_ms, true});
+                lotse::core::AgentOrder::FarthestFirst, 0,
+                lotse::core::continuousHorizon(map_, fleet_size_), 8, plan_time_limit_ms, true});
         lotse::core::FleetManagerConfig config;
         config.windowSeconds = replan_window_seconds;
         config.planTimeLimitMs = plan_time_limit_ms;
