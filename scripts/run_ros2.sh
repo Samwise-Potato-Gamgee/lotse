@@ -13,7 +13,7 @@ lotse::build_image
 
 EXTRA_ARGS="$*"
 lotse::run bash -lc "
-    set -euo pipefail
+    set -eo pipefail
     source /opt/ros/jazzy/setup.bash
     colcon --log-base .build/ros2/log build \
         --base-paths ros2 \
@@ -22,6 +22,7 @@ lotse::run bash -lc "
         --cmake-args -DCMAKE_BUILD_TYPE=Release \
         --event-handlers console_direct+
     source .build/ros2/install/setup.bash
+    set -u
     mkdir -p .build/ros2/results
     ros2 launch lotse_ros warehouse.launch.py result_dir:=.build/ros2/results ${EXTRA_ARGS}
 "
