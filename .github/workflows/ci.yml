@@ -1,7 +1,9 @@
 name: ci
 
-# Runs the same checks as scripts/check.sh: build, unit tests, sanitizers,
-# clang-tidy and clang-format. The GPU link check is not run here.
+# Runs the repository quality gate. scripts/check.sh builds the development
+# image and then runs clang-format, the build with warnings as errors, the unit
+# tests, the address/undefined and thread sanitizers, clang-tidy and the colcon
+# build of the ROS 2 packages. The GPU link check is not run here.
 
 on:
   push:
@@ -14,9 +16,6 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
-
-      - name: Build the Lotse development image
-        run: docker build -f docker/lotse-dev.Dockerfile -t lotse-dev:jazzy docker
 
       - name: Run the quality gate
         run: ./scripts/check.sh
