@@ -1,8 +1,9 @@
 """Turns a raw Isaac Sim recording plus the run log into a labelled H.264 mp4
 with the index at the front, a sped-up clip, a GIF that shows a robot waiting
-for another, and three stills. The overlay is drawn here, frame by frame, only
-from the run log, the camera framing and the map. Runs on the host because the
-simulator image cannot encode H.264.
+for another, and three stills. Each composed frame has a header strip, the
+scaled warehouse scene and a legend panel that never overlap. The overlay is
+drawn here, frame by frame, only from the run log, the camera framing and the
+map. Runs on the host because the simulator image cannot encode H.264.
 """
 
 import argparse
@@ -16,18 +17,27 @@ from PIL import Image
 
 CONTAINER_BOXES = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"dinf", b"edts"}
 
-ROBOT_COLOURS_BGR = [(31, 31, 230), (242, 107, 31), (51, 184, 26), (217, 51, 217)]
-PICKUP_COLOUR_BGR = (64, 166, 13)
-DROPOFF_COLOUR_BGR = (8, 107, 242)
-PARKING_COLOUR_BGR = (242, 77, 38)
-WAIT_OCCUPIED_COLOUR_BGR = (255, 255, 0)
-WAIT_RIGHT_OF_WAY_COLOUR_BGR = (0, 191, 255)
+FRAME_COLOUR_BGR = (18, 18, 22)
+HEADER_HEIGHT = 48
+LEGEND_WIDTH = 320
+SCENE_MARGIN_PX = 10
+
+RENDERED_ROBOT_COLOURS_BGR = [(148, 146, 228), (237, 210, 145), (198, 206, 134),
+                              (237, 179, 230)]
+RENDERED_PICKUP_COLOUR_BGR = (188, 229, 79)
+RENDERED_DROPOFF_COLOUR_BGR = (51, 214, 238)
+RENDERED_PARKING_COLOUR_BGR = (238, 199, 155)
+
+WAIT_OCCUPIED_COLOUR_BGR = (0, 0, 0)
+WAIT_RIGHT_OF_WAY_COLOUR_BGR = (255, 0, 0)
 WAIT_COLOURS_BGR = {"cell_occupied": WAIT_OCCUPIED_COLOUR_BGR,
                     "pass_order": WAIT_RIGHT_OF_WAY_COLOUR_BGR}
 WAIT_LABELS = {"cell_occupied": ("waiting: next cell", "still occupied"),
                "pass_order": ("waiting: right of way",)}
 BAR_COLOUR_BGR = (25, 25, 25)
-PANEL_COLOUR_BGR = (35, 35, 40)
+PANEL_COLOUR_BGR = (228, 228, 231)
+PANEL_TEXT_BGR = (30, 30, 35)
+PANEL_EDGE_BGR = (110, 110, 118)
 
 HIGH_PROFILES = {100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135}
 
@@ -273,26 +283,33 @@ def load_frame_times(path):
     return times
 
 
-def load_stations(path):
-    """Reads the named stations from a Lotse map file.
+def load_map(path):
+    """Reads a Lotse map file into its stations, parking cells and grid size.
     @param path the map file
     """
-    stations = []
     with open(path) as handle:
         lines = [line.rstrip("\n") for line in handle]
-    if "stations" not in lines:
-        return stations
-    start = lines.index("stations") + 1
-    end = lines.index("parking") if "parking" in lines else len(lines)
-    for line in lines[start:end]:
-        parts = line.split()
-        if len(parts) == 3:
-            stations.append((parts[0], int(parts[1]), int(parts[2])))
-    return stations
+    width = int(next(line for line in lines if line.startswith("width")).split()[1])
+    height = int(next(line for line in lines if line.startswith("height")).split()[1])
+    stations = []
+    if "stations" in lines:
+        start = lines.index("stations") + 1
+        end = lines.index("parking") if "parking" in lines else len(lines)
+        for line in lines[start:end]:
+            parts = line.split()
+            if len(parts) == 3:
+                stations.append((parts[0], int(parts[1]), int(parts[2])))
+    parking = []
+    if "parking" in lines:
+        for line in lines[lines.index("parking") + 1:]:
+            parts = line.split()
+            if len(parts) == 2:
+                parking.append((int(parts[0]), int(parts[1])))
+    return {"stations": stations, "parking": parking, "width": width, "height": height}
 
 
 def project(camera, x, y):
-    """Projects a world (x, y) to an integer image pixel with the top-down camera.
+    """Projects a world (x, y) to a source-image pixel with the top-down camera.
     @param camera the camera framing dictionary
     @param x the world x in metres
     @param y the world y in metres
@@ -302,6 +319,61 @@ def project(camera, x, y):
     u = (x - left) / (2.0 * camera["half_width_m"]) * camera["image_width"]
     v = (top - y) / (2.0 * camera["half_height_m"]) * camera["image_height"]
     return int(round(u)), int(round(v))
+
+
+def scene_layout(camera, map_width, map_height):
+    """Returns the crop and scale that fit the warehouse into the scene area.
+    @param camera the camera framing dictionary
+    @param map_width the warehouse width in cells
+    @param map_height the warehouse height in cells
+    """
+    left, bottom = project(camera, 0.0, 0.0)
+    right, top = project(camera, map_width, map_height)
+    crop_x0 = max(0, left - SCENE_MARGIN_PX)
+    crop_y0 = max(0, top - SCENE_MARGIN_PX)
+    crop_x1 = min(camera["image_width"], right + SCENE_MARGIN_PX)
+    crop_y1 = min(camera["image_height"], bottom + SCENE_MARGIN_PX)
+    crop_w = crop_x1 - crop_x0
+    crop_h = crop_y1 - crop_y0
+    area_w = camera["image_width"] - LEGEND_WIDTH
+    area_h = camera["image_height"] - HEADER_HEIGHT
+    scale = min(area_w / crop_w, area_h / crop_h)
+    off_x = (area_w - crop_w * scale) / 2.0
+    off_y = HEADER_HEIGHT + (area_h - crop_h * scale) / 2.0
+    return {"crop_x0": crop_x0, "crop_y0": crop_y0, "crop_w": crop_w, "crop_h": crop_h,
+            "scale": scale, "off_x": off_x, "off_y": off_y}
+
+
+def to_frame(layout, camera, x, y):
+    """Projects a world position into the composed frame.
+    @param layout the scene layout
+    @param camera the camera framing dictionary
+    @param x the world x in metres
+    @param y the world y in metres
+    """
+    sx, sy = project(camera, x, y)
+    u = layout["off_x"] + (sx - layout["crop_x0"]) * layout["scale"]
+    v = layout["off_y"] + (sy - layout["crop_y0"]) * layout["scale"]
+    return int(round(u)), int(round(v))
+
+
+def compose_frame(raw, layout):
+    """Crops the empty margin and scales the warehouse into the scene area.
+    @param raw the raw scene frame
+    @param layout the scene layout
+    """
+    x0 = int(round(layout["crop_x0"]))
+    y0 = int(round(layout["crop_y0"]))
+    x1 = int(round(layout["crop_x0"] + layout["crop_w"]))
+    y1 = int(round(layout["crop_y0"] + layout["crop_h"]))
+    target_w = int(round(layout["crop_w"] * layout["scale"]))
+    target_h = int(round(layout["crop_h"] * layout["scale"]))
+    scene = cv2.resize(raw[y0:y1, x0:x1], (target_w, target_h), interpolation=cv2.INTER_AREA)
+    canvas = np.full((raw.shape[0], raw.shape[1], 3), FRAME_COLOUR_BGR, np.uint8)
+    off_x = int(round(layout["off_x"]))
+    off_y = int(round(layout["off_y"]))
+    canvas[off_y:off_y + target_h, off_x:off_x + target_w] = scene
+    return canvas
 
 
 def state_at(log, time):
@@ -340,38 +412,45 @@ def draw_top_bar(frame, state, total_orders, speed_text):
     @param total_orders how many orders the run releases
     @param speed_text the playback speed text
     """
-    height, width = frame.shape[:2]
+    width = frame.shape[1]
     panel = frame.copy()
-    cv2.rectangle(panel, (0, 0), (width, 44), BAR_COLOUR_BGR, -1)
-    cv2.addWeighted(panel, 0.72, frame, 0.28, 0, frame)
+    cv2.rectangle(panel, (0, 0), (width, HEADER_HEIGHT), BAR_COLOUR_BGR, -1)
+    cv2.addWeighted(panel, 0.80, frame, 0.20, 0, frame)
     text = ("simulated time %.1f s     orders %d / %d     playback %s"
             % (state["t"], state["done"], total_orders, speed_text))
-    draw_label(frame, text, (14, 30), 0.75, (255, 255, 255))
+    draw_label(frame, text, (14, 32), 0.72, (255, 255, 255))
 
 
-def draw_stations(frame, camera, stations):
-    """Draws every named station on its cell.
+def draw_stations(frame, layout, camera, stations):
+    """Draws every named station on its cell, clamped inside the frame.
     @param frame the image to draw on
+    @param layout the scene layout
     @param camera the camera framing dictionary
     @param stations the (name, x, y) stations
     """
+    height, width = frame.shape[:2]
     for name, x, y in stations:
-        u, v = project(camera, x + 0.5, y + 0.5)
-        draw_label(frame, name, (u - 26, v + 34), 0.45, (255, 255, 255))
+        u, v = to_frame(layout, camera, x + 0.5, y + 0.5)
+        origin_x = min(max(u - 30, 2), width - LEGEND_WIDTH - 70)
+        origin_y = min(max(v + 34, HEADER_HEIGHT + 14), height - 6)
+        draw_label(frame, name, (origin_x, origin_y), 0.45, (255, 255, 255))
 
 
-def draw_robots(frame, camera, state):
+def draw_robots(frame, layout, camera, state):
     """Draws each robot's number and a coloured ring for either wait reason.
     @param frame the image to draw on
+    @param layout the scene layout
     @param camera the camera framing dictionary
     @param state the run-log frame
     """
     for robot in state["robots"]:
-        u, v = project(camera, robot["x"], robot["y"])
+        u, v = to_frame(layout, camera, robot["x"], robot["y"])
         colour = WAIT_COLOURS_BGR.get(robot["wait"])
         if colour is not None:
+            cv2.circle(frame, (u, v), 23, (255, 255, 255), 7, cv2.LINE_AA)
             cv2.circle(frame, (u, v), 23, colour, 4, cv2.LINE_AA)
-        draw_label(frame, "R%d" % robot["id"], (u + 13, v - 15), 0.55, (255, 255, 255))
+        label_x = min(max(u + 13, 2), frame.shape[1] - LEGEND_WIDTH - 30)
+        draw_label(frame, "R%d" % robot["id"], (label_x, v - 15), 0.55, (255, 255, 255))
 
 
 def robot_task_text(robot):
@@ -383,66 +462,83 @@ def robot_task_text(robot):
     return "to %s %s" % (robot["phase"], robot["station"])
 
 
-def draw_legend(frame, state, stations):
-    """Draws the colour legend and the waiting marker explanation on the right.
+def draw_swatch(frame, left, row, colour):
+    """Draws a legend colour swatch with a dark border so pastel colours read.
     @param frame the image to draw on
+    @param left the panel left edge
+    @param row the swatch text baseline
+    @param colour the swatch colour in BGR
+    """
+    cv2.rectangle(frame, (left + 10, row - 12), (left + 28, row + 2), PANEL_EDGE_BGR, -1)
+    cv2.rectangle(frame, (left + 11, row - 11), (left + 27, row + 1), colour, -1)
+
+
+def draw_legend(frame, layout, state, map_data):
+    """Draws the colour legend and the two waiting markers on the right.
+    @param frame the image to draw on
+    @param layout the scene layout
     @param state the run-log frame
-    @param stations the (name, x, y) stations
+    @param map_data the map dictionary
     """
     height, width = frame.shape[:2]
-    left = width - 184
+    left = width - LEGEND_WIDTH
     panel = frame.copy()
-    cv2.rectangle(panel, (left, 50), (width - 4, height - 4), PANEL_COLOUR_BGR, -1)
-    cv2.addWeighted(panel, 0.70, frame, 0.30, 0, frame)
-    row = 76
-    draw_label(frame, "Lotse fleet", (left + 10, row), 0.55, (255, 255, 255))
-    row += 28
+    cv2.rectangle(panel, (left, HEADER_HEIGHT), (width, height), PANEL_COLOUR_BGR, -1)
+    cv2.addWeighted(panel, 0.88, frame, 0.12, 0, frame)
+    cv2.line(frame, (left, HEADER_HEIGHT), (left, height), PANEL_EDGE_BGR, 1)
+    row = HEADER_HEIGHT + 28
+    draw_label(frame, "Lotse fleet", (left + 10, row), 0.52, PANEL_TEXT_BGR)
+    row += 26
     for robot in state["robots"]:
-        colour = ROBOT_COLOURS_BGR[robot["id"] % len(ROBOT_COLOURS_BGR)]
-        cv2.rectangle(frame, (left + 10, row - 12), (left + 24, row + 2), colour, -1)
-        draw_label(frame, "R%d" % robot["id"], (left + 32, row), 0.5, (255, 255, 255))
+        colour = RENDERED_ROBOT_COLOURS_BGR[robot["id"] % len(RENDERED_ROBOT_COLOURS_BGR)]
+        draw_swatch(frame, left, row, colour)
+        draw_label(frame, "R%d" % robot["id"], (left + 36, row), 0.48, PANEL_TEXT_BGR)
         row += 20
-        draw_label(frame, robot_task_text(robot), (left + 32, row), 0.42, (235, 235, 235))
+        draw_label(frame, robot_task_text(robot), (left + 36, row), 0.42, PANEL_TEXT_BGR)
         row += 20
         for line in WAIT_LABELS.get(robot["wait"], ()):
-            draw_label(frame, line, (left + 32, row), 0.38, WAIT_COLOURS_BGR[robot["wait"]])
-            row += 16
-        row += 10
-    row += 6
-    for name, colour in (("pickup", PICKUP_COLOUR_BGR), ("dropoff", DROPOFF_COLOUR_BGR),
-                         ("parking", PARKING_COLOUR_BGR)):
-        cv2.rectangle(frame, (left + 10, row - 12), (left + 24, row + 2), colour, -1)
-        draw_label(frame, name, (left + 32, row), 0.45, (235, 235, 235))
+            draw_label(frame, line, (left + 36, row), 0.40, WAIT_COLOURS_BGR[robot["wait"]])
+            row += 17
+        row += 12
+    row += 4
+    for name, colour in (("pickup", RENDERED_PICKUP_COLOUR_BGR),
+                         ("dropoff", RENDERED_DROPOFF_COLOUR_BGR),
+                         ("parking", RENDERED_PARKING_COLOUR_BGR)):
+        draw_swatch(frame, left, row, colour)
+        draw_label(frame, name, (left + 36, row), 0.44, PANEL_TEXT_BGR)
         row += 24
-    row += 6
-    cv2.circle(frame, (left + 17, row - 5), 9, WAIT_OCCUPIED_COLOUR_BGR, 3, cv2.LINE_AA)
-    for line in WAIT_LABELS["cell_occupied"]:
-        draw_label(frame, line, (left + 32, row), 0.38, WAIT_OCCUPIED_COLOUR_BGR)
-        row += 16
     row += 8
-    cv2.circle(frame, (left + 17, row - 5), 9, WAIT_RIGHT_OF_WAY_COLOUR_BGR, 3, cv2.LINE_AA)
+    cv2.circle(frame, (left + 19, row - 5), 9, PANEL_EDGE_BGR, 5, cv2.LINE_AA)
+    cv2.circle(frame, (left + 19, row - 5), 9, WAIT_OCCUPIED_COLOUR_BGR, 3, cv2.LINE_AA)
+    for line in WAIT_LABELS["cell_occupied"]:
+        draw_label(frame, line, (left + 36, row), 0.40, WAIT_OCCUPIED_COLOUR_BGR)
+        row += 17
+    row += 8
+    cv2.circle(frame, (left + 19, row - 5), 9, PANEL_EDGE_BGR, 5, cv2.LINE_AA)
+    cv2.circle(frame, (left + 19, row - 5), 9, WAIT_RIGHT_OF_WAY_COLOUR_BGR, 3, cv2.LINE_AA)
     for line in WAIT_LABELS["pass_order"]:
-        draw_label(frame, line, (left + 32, row), 0.38, WAIT_RIGHT_OF_WAY_COLOUR_BGR)
-        row += 16
-    draw_label(frame, "%d stations" % len(stations), (left + 10, height - 16), 0.40,
-               (180, 180, 180))
+        draw_label(frame, line, (left + 36, row), 0.40, WAIT_RIGHT_OF_WAY_COLOUR_BGR)
+        row += 17
+    draw_label(frame, "%d stations" % len(map_data["stations"]), (left + 10, height - 14),
+               0.40, PANEL_EDGE_BGR)
 
 
-def draw_overlay(frame, state, camera, stations, total_orders, speed_text):
-    """Draws the whole overlay for one frame from the run-log state.
+def draw_overlay(frame, state, layout, camera, map_data, total_orders, speed_text):
+    """Draws the whole overlay for one composed frame from the run-log state.
     @param frame the image to draw on
     @param state the run-log frame
+    @param layout the scene layout
     @param camera the camera framing dictionary
-    @param stations the (name, x, y) stations
+    @param map_data the map dictionary
     @param total_orders how many orders the run releases
     @param speed_text the playback speed text
     """
     if state is None:
         return
-    draw_stations(frame, camera, stations)
-    draw_robots(frame, camera, state)
+    draw_stations(frame, layout, camera, map_data["stations"])
+    draw_robots(frame, layout, camera, state)
     draw_top_bar(frame, state, total_orders, speed_text)
-    draw_legend(frame, state, stations)
+    draw_legend(frame, layout, state, map_data)
 
 
 def open_writer(path, fps, width, height):
@@ -458,39 +554,41 @@ def open_writer(path, fps, width, height):
     return writer
 
 
-def render_video(raw_path, out_path, fps, camera, run_log, stations, frame_times,
+def render_video(raw_path, out_path, fps, camera, layout, run_log, map_data, frame_times,
                  total_orders, step, scale, speed_text):
-    """Draws the overlay and re-encodes a raw recording, optionally sped up.
+    """Composes the scene, draws the overlay and re-encodes, optionally sped up.
     @param raw_path the raw recording
     @param out_path the H.264 mp4 to write
     @param fps the output frame rate
     @param camera the camera framing dictionary
+    @param layout the scene layout
     @param run_log the run log
-    @param stations the (name, x, y) stations
+    @param map_data the map dictionary
     @param frame_times the simulated time of every raw frame
     @param total_orders how many orders the run releases
     @param step keep every step-th frame, so the clip plays step times faster
-    @param scale the output size as a fraction of the raw size
+    @param scale the output size as a fraction of the composed size
     @param speed_text the playback speed shown in the overlay
     """
     source = cv2.VideoCapture(raw_path)
     if not source.isOpened():
         raise RuntimeError("cannot open " + raw_path)
-    width = int(source.get(cv2.CAP_PROP_FRAME_WIDTH) * scale)
-    height = int(source.get(cv2.CAP_PROP_FRAME_HEIGHT) * scale)
+    width = int(camera["image_width"] * scale)
+    height = int(camera["image_height"] * scale)
     writer = open_writer(out_path, fps, width, height)
     index = 0
     kept = 0
     while True:
-        ok, frame = source.read()
+        ok, raw = source.read()
         if not ok:
             break
         if index % step == 0:
+            frame = compose_frame(raw, layout)
             time = frame_times[index] if index < len(frame_times) else None
             draw_overlay(frame, state_at(run_log, time) if time is not None else None,
-                         camera, stations, total_orders, speed_text)
+                         layout, camera, map_data, total_orders, speed_text)
             if scale != 1.0:
-                frame = cv2.resize(frame, (width, height))
+                frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
             writer.write(frame)
             kept += 1
         index += 1
@@ -556,14 +654,15 @@ def wait_summary(waits):
     return summary
 
 
-def render_gif(raw_path, out_path, camera, run_log, stations, frame_times, total_orders,
+def render_gif(raw_path, out_path, camera, layout, run_log, map_data, frame_times, total_orders,
                window, fps, width, colours, max_bytes):
     """Writes a labelled GIF of one waiting window, shrinking it until it fits.
     @param raw_path the raw recording
     @param out_path the GIF to write
     @param camera the camera framing dictionary
+    @param layout the scene layout
     @param run_log the run log
-    @param stations the (name, x, y) stations
+    @param map_data the map dictionary
     @param frame_times the simulated time of every raw frame
     @param total_orders how many orders the run releases
     @param window the (start, end, kind, wait) simulated-time window
@@ -582,13 +681,16 @@ def render_gif(raw_path, out_path, camera, run_log, stations, frame_times, total
     frames = []
     index = 0
     while True:
-        ok, frame = source.read()
+        ok, raw = source.read()
         if not ok:
             break
         time = frame_times[index] if index < len(frame_times) else None
         if time is not None and start <= time <= end and index % step == 0:
-            draw_overlay(frame, state_at(run_log, time), camera, stations, total_orders, "1x")
-            frames.append(cv2.resize(frame, (width, int(frame.shape[0] * scale))))
+            frame = compose_frame(raw, layout)
+            draw_overlay(frame, state_at(run_log, time), layout, camera, map_data,
+                         total_orders, "1x")
+            frames.append(cv2.resize(frame, (width, int(frame.shape[0] * scale)),
+                                     interpolation=cv2.INTER_AREA))
         index += 1
     source.release()
     if not frames:
@@ -656,9 +758,9 @@ def overlay_pixels(frame):
     @param frame the image to test
     """
     height, width = frame.shape[:2]
-    column = frame[50:height, width - 184:width].astype(int)
+    column = frame[HEADER_HEIGHT:height, width - LEGEND_WIDTH:width].astype(int)
     total = 0
-    for colour in ROBOT_COLOURS_BGR:
+    for colour in RENDERED_ROBOT_COLOURS_BGR:
         distance = np.sqrt(np.sum((column - np.array(colour, dtype=int)) ** 2, axis=2))
         total += int((distance < 40).sum())
     return total
@@ -685,40 +787,59 @@ def still(path, fraction, out_path):
             "gray": gray, "overlay": overlay_pixels(frame)}
 
 
-def detect_disc(frame, camera, x, y, colour_bgr):
-    """Returns the centroid of a robot disc near a projected world position.
+def detect_disc(frame, layout, camera, x, y, colour_bgr):
+    """Returns the centroid of a robot disc near a planned robot position.
     @param frame the image to search
+    @param layout the scene layout
     @param camera the camera framing dictionary
-    @param x the projected world x in metres
-    @param y the projected world y in metres
-    @param colour_bgr the robot's disc colour in BGR
+    @param x the world x in metres
+    @param y the world y in metres
+    @param colour_bgr the robot's rendered disc colour in BGR
     """
     height, width = frame.shape[:2]
-    u, v = project(camera, x, y)
-    left_edge, _ = project(camera, 0.0, 0.0)
-    right_edge, _ = project(camera, camera["half_width_m"] * 2.0, 0.0)
+    u, v = to_frame(layout, camera, x, y)
+    right_edge = width - LEGEND_WIDTH
     window = 40
-    x0 = max(left_edge, u - window)
+    x0 = max(0, u - window)
     x1 = min(right_edge, u + window)
-    y0 = max(50, v - window)
+    y0 = max(HEADER_HEIGHT, v - window)
     y1 = min(height - 1, v + window)
     if x1 <= x0 or y1 <= y0:
         return None
     hsv = cv2.cvtColor(frame[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
-    reference = cv2.cvtColor(np.uint8([[colour_bgr]]), cv2.COLOR_BGR2HSV)[0][0]
+    reference = cv2.cvtColor(np.uint8([[colour_bgr]]), cv2.COLOR_BGR2HSV)[0, 0]
     hue = hsv[:, :, 0].astype(int)
     gap = np.abs(hue - int(reference[0]))
     gap = np.minimum(gap, 180 - gap)
-    mask = (gap <= 20) & (hsv[:, :, 1] > 70) & (hsv[:, :, 2] > 60)
+    mask = (gap <= 18) & (hsv[:, :, 1] > 60) & (hsv[:, :, 2] > 70)
     if int(mask.sum()) < 20:
         return None
     rows, columns = np.nonzero(mask)
     return (x0 + float(columns.mean()), y0 + float(rows.mean()))
 
 
-def alignment_report(full_path, camera, run_log, frame_times):
+def marker_pixels(frame, layout, camera, x, y, colour):
+    """Counts pixels near a marker colour within 44 px of a world position.
+    @param frame the image to count in
+    @param layout the scene layout
+    @param camera the camera framing dictionary
+    @param x the world x in metres
+    @param y the world y in metres
+    @param colour the marker colour in BGR
+    """
+    height, width = frame.shape[:2]
+    u, v = to_frame(layout, camera, x, y)
+    x0, x1 = max(0, u - 44), min(width - LEGEND_WIDTH, u + 44)
+    y0, y1 = max(HEADER_HEIGHT, v - 44), min(height, v + 44)
+    crop = frame[y0:y1, x0:x1].astype(int)
+    distance = np.sqrt(np.sum((crop - np.array(colour, dtype=int)) ** 2, axis=2))
+    return int((distance < 90).sum())
+
+
+def alignment_report(full_path, layout, camera, run_log, frame_times):
     """Reports how far each projected robot label sits from its rendered disc.
     @param full_path the encoded full video
+    @param layout the scene layout
     @param camera the camera framing dictionary
     @param run_log the run log
     @param frame_times the simulated time of every raw frame
@@ -737,33 +858,16 @@ def alignment_report(full_path, camera, run_log, frame_times):
         if state is None:
             continue
         for robot in state["robots"]:
-            colour = ROBOT_COLOURS_BGR[robot["id"] % len(ROBOT_COLOURS_BGR)]
-            centre = detect_disc(frame, camera, robot["x"], robot["y"], colour)
+            colour = RENDERED_ROBOT_COLOURS_BGR[robot["id"] % len(RENDERED_ROBOT_COLOURS_BGR)]
+            centre = detect_disc(frame, layout, camera, robot["x"], robot["y"], colour)
             if centre is None:
                 continue
-            u, v = project(camera, robot["x"], robot["y"])
+            u, v = to_frame(layout, camera, robot["x"], robot["y"])
             offset = float(np.hypot(centre[0] - u, centre[1] - v))
             largest = max(largest, offset)
             checked += 1
     capture.release()
     return largest, checked
-
-
-def marker_pixels(frame, camera, x, y, colour):
-    """Counts pixels near a marker colour within 44 px of a world position.
-    @param frame the image to count in
-    @param camera the camera framing dictionary
-    @param x the world x in metres
-    @param y the world y in metres
-    @param colour the marker colour in BGR
-    """
-    height, width = frame.shape[:2]
-    u, v = project(camera, x, y)
-    x0, x1 = max(0, u - 44), min(width, u + 44)
-    y0, y1 = max(0, v - 44), min(height, v + 44)
-    crop = frame[y0:y1, x0:x1].astype(int)
-    distance = np.sqrt(np.sum((crop - np.array(colour, dtype=int)) ** 2, axis=2))
-    return int((distance < 90).sum())
 
 
 def main():
@@ -792,21 +896,25 @@ def main():
     camera = load_camera(args.camera)
     run_log = load_run_log(args.run_log)
     frame_times = load_frame_times(args.frames_log)
-    stations = load_stations(args.map)
+    map_data = load_map(args.map)
+    layout = scene_layout(camera, map_data["width"], map_data["height"])
     total_orders = max((entry["released"] for entry in run_log), default=12)
     failures = 0
 
     print("run log: %d frames, t_abs %.2f to %.2f, total orders %d"
           % (len(run_log), run_log[0]["t_abs"], run_log[-1]["t_abs"], total_orders), flush=True)
+    print("scene layout: crop %.0fx%.0f at (%.0f, %.0f), scale %.3f"
+          % (layout["crop_w"], layout["crop_h"], layout["crop_x0"], layout["crop_y0"],
+             layout["scale"]), flush=True)
 
     full_frames, full_width, full_height = render_video(
-        args.input, args.full, args.fps, camera, run_log, stations, frame_times,
+        args.input, args.full, args.fps, camera, layout, run_log, map_data, frame_times,
         total_orders, 1, 1.0, "1x")
     print(f"full: {full_width}x{full_height} {full_frames} frames "
           f"{full_frames / args.fps:.1f} s", flush=True)
 
     clip_frames, clip_width, clip_height = render_video(
-        args.input, args.clip, args.fps, camera, run_log, stations, frame_times,
+        args.input, args.clip, args.fps, camera, layout, run_log, map_data, frame_times,
         total_orders, args.clip_speed, args.clip_scale, "%dx" % args.clip_speed)
     print(f"clip: {clip_width}x{clip_height} {clip_frames} frames "
           f"{clip_frames / args.fps:.1f} s at {args.clip_speed}x", flush=True)
@@ -824,13 +932,13 @@ def main():
         gif_frames = 0
         failures += 1
     else:
-        gif_frames = render_gif(args.input, args.gif, camera, run_log, stations, frame_times,
-                                total_orders, window, args.gif_fps, args.gif_width,
+        gif_frames = render_gif(args.input, args.gif, camera, layout, run_log, map_data,
+                                frame_times, total_orders, window, args.gif_fps, args.gif_width,
                                 args.gif_colours, int(args.gif_max_mb * 1024 * 1024))
         wait = window[3]
         print("gif: starts at %.1f s, covers %.1f to %.1f s, holds %s for R%d from "
               "%.1f to %.1f s, %d frames"
-              % (window[0], window[0], window[1], window[2], wait["robot"] + 1,
+              % (window[0], window[0], window[1], window[2], wait["robot"],
                  wait["start"], wait["end"], gif_frames), flush=True)
 
     for label, path in (("full", args.full), ("clip", args.clip)):
@@ -868,14 +976,15 @@ def main():
         ok, marker_frame = capture.read()
         capture.release()
         if ok and robot is not None:
-            occupied = marker_pixels(marker_frame, camera, robot["x"], robot["y"],
+            occupied = marker_pixels(marker_frame, layout, camera, robot["x"], robot["y"],
                                      WAIT_OCCUPIED_COLOUR_BGR)
-            right_of_way = marker_pixels(marker_frame, camera, robot["x"], robot["y"],
+            right_of_way = marker_pixels(marker_frame, layout, camera, robot["x"], robot["y"],
                                          WAIT_RIGHT_OF_WAY_COLOUR_BGR)
             print("marker pixels at %.1f s (frame %d): next cell occupied %d, right of way %d"
                   % (frame_times[index], index, occupied, right_of_way), flush=True)
 
     previous = None
+    edge_failures = 0
     for index, fraction in enumerate((0.1, 0.5, 0.9)):
         path = f"{args.stills_dir}/{args.stills_prefix}_{index}.png"
         info = still(args.full, fraction, path)
@@ -894,8 +1003,15 @@ def main():
             if difference < 0.2:
                 failures += 1
         previous = info["gray"]
+        edge_failures += count_edge_labels(path, layout, camera, map_data)
+    if edge_failures:
+        print(f"label edge check FAIL: {edge_failures} labels run past a frame edge", flush=True)
+        failures += 1
+    else:
+        print("label edge check: no label runs past a frame edge in the three stills",
+              flush=True)
 
-    largest, checked = alignment_report(args.full, camera, run_log, frame_times)
+    largest, checked = alignment_report(args.full, layout, camera, run_log, frame_times)
     print(f"alignment: {checked} robot labels checked, largest offset {largest:.1f} px",
           flush=True)
     if checked == 0 or largest > 12.0:
@@ -907,6 +1023,30 @@ def main():
         return 1
     print("video checks passed", flush=True)
     return 0
+
+
+def count_edge_labels(path, layout, camera, map_data):
+    """Counts station labels in a still that would run past the scene area edge.
+    @param path the still PNG
+    @param layout the scene layout
+    @param camera the camera framing dictionary
+    @param map_data the map dictionary
+    """
+    frame = cv2.imread(path)
+    if frame is None:
+        return 1
+    height, width = frame.shape[:2]
+    scene_right = width - LEGEND_WIDTH
+    bad = 0
+    for name, x, y in map_data["stations"]:
+        u, v = to_frame(layout, camera, x + 0.5, y + 0.5)
+        origin = (min(max(u - 30, 2), scene_right - 70),
+                  min(max(v + 34, HEADER_HEIGHT + 14), height - 6))
+        (text_w, text_h), _ = cv2.getTextSize(name, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        if origin[0] + text_w > scene_right or origin[1] > height or \
+                origin[1] - text_h < HEADER_HEIGHT:
+            bad += 1
+    return bad
 
 
 if __name__ == "__main__":
