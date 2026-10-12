@@ -128,6 +128,9 @@ class BitReader:
     """Reads Exp-Golomb and fixed-width fields from an RBSP byte string."""
 
     def __init__(self, data):
+        """Stores the unescaped RBSP byte string to read.
+        @param data the RBSP bytes
+        """
         self.data = data
         self.pos = 0
 
