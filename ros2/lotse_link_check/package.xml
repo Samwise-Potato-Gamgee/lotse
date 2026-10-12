@@ -8,7 +8,7 @@
     simulated odometry, that it moved: the link check between Lotse and Isaac
     Sim.
   </description>
-  <maintainer email="b.lingaraju@edu.rptu.de">Bharath Lingaraju</maintainer>
+  <maintainer email="bharathlingaraju1507@gmail.com">Bharath Lingaraju</maintainer>
   <license>All rights reserved</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
