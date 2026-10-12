@@ -25,6 +25,7 @@ struct ServiceConfig {
     double priorityAgeingSeconds = 5.0;
     double deadlockPatienceSeconds = 40.0;
     bool backgroundPlanning = false;
+    bool stableOrder = false;
     bool passOrder = true;
     double slowdownProbability = 0.0;
     double stopProbability = 0.0;

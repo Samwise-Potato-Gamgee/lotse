@@ -129,6 +129,7 @@ TEST(ConfigTest, LoadsValuesAndDefaults) {
         file << "fleet_size = 3   # inline comment\n";
         file << "port = 1234\n";
         file << "pass_order = false\n";
+        file << "stable_order = true\n";
         file << "slowdown_probability = 0.25\n";
     }
     const ServiceConfig config = lotse::service::loadConfig(path);
@@ -136,9 +137,17 @@ TEST(ConfigTest, LoadsValuesAndDefaults) {
     EXPECT_EQ(config.fleetSize, 3);
     EXPECT_EQ(config.port, 1234);
     EXPECT_FALSE(config.passOrder);
+    EXPECT_TRUE(config.stableOrder);
     EXPECT_DOUBLE_EQ(config.slowdownProbability, 0.25);
     EXPECT_EQ(config.planner, "prioritized");
     EXPECT_EQ(config.bindAddress, "127.0.0.1");
+}
+
+TEST(ConfigTest, StableOrderIsOffByDefaultAndOnInTheShippedConfig) {
+    EXPECT_FALSE(lotse::service::defaultConfig().stableOrder);
+    const ServiceConfig shipped =
+        lotse::service::loadConfig(std::string(LOTSE_SOURCE_DIR) + "/config/lotse.conf");
+    EXPECT_TRUE(shipped.stableOrder);
 }
 
 TEST(ConfigTest, RejectsUnknownSettingAndMissingFile) {

@@ -96,11 +96,13 @@ struct Runtime::Impl {
         if (config.planner == "cbs") {
             planner = std::make_unique<core::CbsPlanner>(
                 core::CbsOptions{config.planTimeLimitMs, 0, horizon});
-            fallback = std::make_unique<core::PrioritizedPlanner>(core::PrioritizedOptions{
-                core::AgentOrder::FarthestFirst, 0, horizon, 8, config.planTimeLimitMs, true});
+            fallback = std::make_unique<core::PrioritizedPlanner>(
+                core::PrioritizedOptions{core::AgentOrder::FarthestFirst, 0, horizon, 8,
+                                         config.planTimeLimitMs, true, config.stableOrder});
         } else if (config.planner == "prioritized") {
-            planner = std::make_unique<core::PrioritizedPlanner>(core::PrioritizedOptions{
-                core::AgentOrder::FarthestFirst, 0, horizon, 8, config.planTimeLimitMs, true});
+            planner = std::make_unique<core::PrioritizedPlanner>(
+                core::PrioritizedOptions{core::AgentOrder::FarthestFirst, 0, horizon, 8,
+                                         config.planTimeLimitMs, true, config.stableOrder});
         } else {
             throw std::runtime_error("service: unknown planner " + config.planner);
         }

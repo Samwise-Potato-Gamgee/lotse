@@ -109,6 +109,7 @@ ServiceConfig loadConfig(const std::string& path) {
                                                                 {"priority_ageing_seconds", true},
                                                                 {"deadlock_patience_seconds", true},
                                                                 {"background_planning", true},
+                                                                {"stable_order", true},
                                                                 {"pass_order", true},
                                                                 {"slowdown_probability", true},
                                                                 {"stop_probability", true},
@@ -193,6 +194,9 @@ ServiceConfig loadConfig(const std::string& path) {
     }
     if (const auto value = find(values, "background_planning")) {
         config.backgroundPlanning = parseBool(*value, "background_planning");
+    }
+    if (const auto value = find(values, "stable_order")) {
+        config.stableOrder = parseBool(*value, "stable_order");
     }
     if (const auto value = find(values, "pass_order")) {
         config.passOrder = parseBool(*value, "pass_order");
