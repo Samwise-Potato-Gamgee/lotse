@@ -72,6 +72,9 @@ struct ThroughputStats {
     int planningFailures = 0;
     int planAdoptions = 0;
     int planRejections = 0;
+    bool noProgress = false;
+    bool progressAlarm = false;
+    double secondsWithoutProgress = 0.0;
 };
 
 /// Why a robot was held at a cell during one tick.
@@ -84,6 +87,8 @@ struct ManagerDiagnostics {
     std::vector<double> passOrderWaitSeconds;
     std::vector<double> noWaypointSeconds;
     std::vector<double> planningCallMs;
+    std::vector<std::vector<int>> planningOrders;
+    std::vector<int> planningAttempts;
     int rightOfWayFlips = 0;
     int rightOfWayComparisons = 0;
     int planningTimeouts = 0;
@@ -99,6 +104,7 @@ struct FleetManagerConfig {
     int planTimeLimitMs = 500;
     double priorityAgeingSeconds = 1.25;
     double deadlockPatienceSeconds = 15.0;
+    double progressWindowSeconds = 0.0;
     bool backgroundPlanning = true;
     bool passOrderEnabled = true;
     bool diagnostics = false;

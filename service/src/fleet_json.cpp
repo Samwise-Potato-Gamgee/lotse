@@ -122,6 +122,9 @@ std::string throughputJson(const core::FleetManager& manager) {
     document["planning_failures"] = stats.planningFailures;
     document["plan_adoptions"] = stats.planAdoptions;
     document["plan_rejections"] = stats.planRejections;
+    document["no_progress"] = stats.noProgress;
+    document["progress_alarm"] = stats.progressAlarm;
+    document["seconds_without_progress"] = stats.secondsWithoutProgress;
     return document.dump();
 }
 
@@ -136,6 +139,9 @@ std::string healthJson(const core::FleetManager& manager, int robots, const std:
     document["collisions"] = report.collisions;
     document["swaps"] = report.swaps;
     document["planner"] = planner;
+    document["no_progress"] = stats.noProgress;
+    document["progress_alarm"] = stats.progressAlarm;
+    document["seconds_without_progress"] = stats.secondsWithoutProgress;
     return document.dump();
 }
 

@@ -25,7 +25,7 @@ RAW="results/ros2_integration_runs.csv"
 mkdir -p results
 : > "${OUT}"
 : > "${RAW}"
-echo "setup,map,fleet,seed,obstacle,order_count,completed,contacts,min_distance,deadlocked,grid_collisions,plan_adoptions,plan_rejections,robots_used,stopped_frames,status,planning_calls,planning_p95_ms,planning_max_ms" >> "${RAW}"
+echo "setup,map,fleet,seed,obstacle,order_count,completed,contacts,min_distance,deadlocked,grid_collisions,plan_adoptions,plan_rejections,robots_used,stopped_frames,status,planning_calls,planning_p95_ms,planning_max_ms,no_progress,progress_alarm,seconds_without_progress" >> "${RAW}"
 
 MAX_PARALLEL="${LOTSE_ROS_PARALLEL:-1}"
 DOMAIN_BASE="${LOTSE_ROS_DOMAIN_BASE:-40}"
@@ -77,7 +77,7 @@ runCase() {
         result_dir:="${dir}" ${extra} > "${dir}/launch.log" 2>&1 || true
 
     if [[ ! -f "${dir}/fleet.json" || ! -f "${dir}/judge.json" ]]; then
-        printf '%s,%s,%s,%s,%s,%s,0,-1,0,true,-1,0,0,0,0,MISSING,0,0,0\n' \
+        printf '%s,%s,%s,%s,%s,%s,0,-1,0,true,-1,0,0,0,0,MISSING,0,0,0,false,false,0\n' \
             "${setup}" "${map}" "${fleet}" "${seed}" "${obstacle}" "${order_count}" > "${dir}/fields"
         echo "FAIL" > "${dir}/status"
         return
@@ -85,6 +85,7 @@ runCase() {
 
     local completed contacts minimum stopped deadlocked grid adoptions rejections robots
     local planning_calls planning_p95 planning_max
+    local no_progress progress_alarm seconds_without_progress
     completed=$(readValue "${dir}/fleet.json" orders_completed)
     contacts=$(readValue "${dir}/judge.json" contacts)
     minimum=$(readValue "${dir}/judge.json" min_distance)
@@ -97,6 +98,9 @@ runCase() {
     planning_calls=$(readValue "${dir}/fleet.json" planning_calls)
     planning_p95=$(readValue "${dir}/fleet.json" planning_p95_ms)
     planning_max=$(readValue "${dir}/fleet.json" planning_max_ms)
+    no_progress=$(readBool "${dir}/fleet.json" no_progress)
+    progress_alarm=$(readBool "${dir}/fleet.json" progress_alarm)
+    seconds_without_progress=$(readValue "${dir}/fleet.json" seconds_without_progress)
 
     local status="ok"
     if [[ "${completed}" -lt "${order_count}" || "${deadlocked}" != "false" ||
@@ -106,11 +110,12 @@ runCase() {
     if [[ "${obstacle}" == "yes" && "${stopped}" -eq 0 ]]; then
         status="FAIL"
     fi
-    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
         "${setup}" "${map}" "${fleet}" "${seed}" "${obstacle}" "${order_count}" \
         "${completed}" "${contacts}" "${minimum}" "${deadlocked}" "${grid}" \
         "${adoptions}" "${rejections}" "${robots}" "${stopped}" "${status}" \
-        "${planning_calls}" "${planning_p95}" "${planning_max}" > "${dir}/fields"
+        "${planning_calls}" "${planning_p95}" "${planning_max}" \
+        "${no_progress}" "${progress_alarm}" "${seconds_without_progress}" > "${dir}/fields"
     echo "${status}" > "${dir}/status"
 }
 
@@ -158,7 +163,8 @@ for dir in .build/ros2/case-*/; do
         IFS=',' read -r run_setup run_map run_fleet run_seed run_obstacle run_orders \
             run_completed run_contacts run_min run_deadlocked run_grid run_adoptions \
             run_rejections run_robots run_stopped run_status run_planning_calls \
-            run_planning_p95 run_planning_max < "${dir}fields"
+            run_planning_p95 run_planning_max run_no_progress run_progress_alarm \
+            run_seconds_without_progress < "${dir}fields"
         run_status="ok"
         if [[ "${run_completed}" -lt "${run_orders}" || "${run_deadlocked}" != "false" ||
             "${run_contacts}" -ne 0 || "${run_grid}" -ne 0 ]]; then
@@ -167,12 +173,13 @@ for dir in .build/ros2/case-*/; do
         if [[ "${run_obstacle}" == "yes" && "${run_stopped}" -eq 0 ]]; then
             run_status="FAIL"
         fi
-        printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+        printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
             "${run_setup}" "${run_map}" "${run_fleet}" "${run_seed}" "${run_obstacle}" \
             "${run_orders}" "${run_completed}" "${run_contacts}" "${run_min}" \
             "${run_deadlocked}" "${run_grid}" "${run_adoptions}" "${run_rejections}" \
             "${run_robots}" "${run_stopped}" "${run_status}" "${run_planning_calls}" \
-            "${run_planning_p95}" "${run_planning_max}" >> "${RAW}"
+            "${run_planning_p95}" "${run_planning_max}" "${run_no_progress}" \
+            "${run_progress_alarm}" "${run_seconds_without_progress}" >> "${RAW}"
         if [[ "${run_status}" != "ok" ]]; then
             FAILURES=$((FAILURES + 1))
         fi

@@ -31,6 +31,8 @@ struct LivenessScenario {
     double stallSeconds = 120.0;
     double horizonSeconds = 600.0;
     bool backgroundPlanning = false;
+    bool stableOrder = false;
+    double progressWindowSeconds = 0.0;
     bool collectDiagnostics = false;
     std::uint32_t seed = 0;
 };
@@ -55,6 +57,8 @@ struct LivenessOutcome {
     double baselineSeconds = 0.0;
     double ratio = 0.0;
     bool slow = false;
+    bool progressAlarm = false;
+    double secondsWithoutProgress = 0.0;
     core::ManagerDiagnostics diagnostics{};
     std::string detail;
 };
@@ -91,6 +95,7 @@ struct LivenessTotals {
     int slowRuns = 0;
     int collisionRuns = 0;
     int swapRuns = 0;
+    int progressAlarmRuns = 0;
     long long ordersCompleted = 0;
     long long ordersTotal = 0;
 };

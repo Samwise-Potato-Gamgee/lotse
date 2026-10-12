@@ -38,6 +38,8 @@ struct Options {
     double tickSeconds = 0.05;
     bool backgroundPlanning = false;
     bool oneStepGap = true;
+    bool stableOrder = false;
+    double progressWindowSeconds = 0.0;
     bool diagnostics = false;
     std::string outDir = "results";
     std::string tag;
@@ -117,6 +119,10 @@ struct Options {
             options.oneStepGap = optionValue(argv, argc, index) == "on";
         } else if (flag == "--diagnostics") {
             options.diagnostics = optionValue(argv, argc, index) == "on";
+        } else if (flag == "--stable-order") {
+            options.stableOrder = optionValue(argv, argc, index) == "on";
+        } else if (flag == "--progress-window") {
+            options.progressWindowSeconds = std::stod(optionValue(argv, argc, index));
         } else if (flag == "--out-dir") {
             options.outDir = optionValue(argv, argc, index);
         } else if (flag == "--tag") {
@@ -239,7 +245,7 @@ void runRange(const std::vector<lotse::benchmark::LivenessScenario>& scenarios,
             "adoptions,rejections,right_of_way_flips,right_of_way_comparisons,"
             "planning_timeouts,planning_routing_failures,seconds_without_fresh_plan,"
             "max_seconds_without_fresh_plan,pass_order_wait_seconds,cell_occupied_wait_seconds,"
-            "no_waypoint_seconds\n";
+            "no_waypoint_seconds,progress_alarm,seconds_without_progress\n";
     for (const lotse::benchmark::LivenessOutcome& outcome : outcomes) {
         const lotse::core::ManagerDiagnostics& diag = outcome.diagnostics;
         double passWait = 0.0;
@@ -262,7 +268,8 @@ void runRange(const std::vector<lotse::benchmark::LivenessScenario>& scenarios,
              << diag.rightOfWayFlips << ',' << diag.rightOfWayComparisons << ','
              << diag.planningTimeouts << ',' << diag.planningRoutingFailures << ','
              << diag.secondsWithoutFreshPlan << ',' << diag.maxSecondsWithoutFreshPlan << ','
-             << passWait << ',' << occupiedWait << ',' << noWaypoint << '\n';
+             << passWait << ',' << occupiedWait << ',' << noWaypoint << ','
+             << (outcome.progressAlarm ? 1 : 0) << ',' << outcome.secondsWithoutProgress << '\n';
     }
     return text.str();
 }
@@ -311,6 +318,7 @@ void runRange(const std::vector<lotse::benchmark::LivenessScenario>& scenarios,
          << ", runs with collision " << totals.collisionRuns << ", runs with swap "
          << totals.swapRuns << '\n';
     text << "  orders completed " << totals.ordersCompleted << " / " << totals.ordersTotal << '\n';
+    text << "  progress alarms " << totals.progressAlarmRuns << '\n';
 
     std::vector<double> ratios;
     for (const lotse::benchmark::LivenessOutcome& outcome : outcomes) {
@@ -375,6 +383,8 @@ int main(int argc, char** argv) {
             scenario.stallSeconds = options.stallSeconds;
             scenario.tickSeconds = options.tickSeconds;
             scenario.backgroundPlanning = options.backgroundPlanning;
+            scenario.stableOrder = options.stableOrder;
+            scenario.progressWindowSeconds = options.progressWindowSeconds;
             scenario.collectDiagnostics = options.diagnostics;
             scenario.seed += static_cast<std::uint32_t>(options.seedStart);
         }

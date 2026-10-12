@@ -107,6 +107,13 @@ struct FleetManager::Impl {
     bool needsReplan = true;
     int stagnantSteps = 0;
     bool deadlock = false;
+    int lastProgressStep = 0;
+    int lastProgressOrders = 0;
+    int lowestGoalDistance = 0;
+    bool hasProgressBaseline = false;
+    bool noProgress = false;
+    bool progressAlarm = false;
+    double secondsWithoutProgress = 0.0;
     bool backgroundPlanning = true;
     double tickSeconds = 1.0;
 
@@ -538,6 +545,8 @@ struct FleetManager::Impl {
             diag.planningCallMs.push_back(std::chrono::duration<double, std::milli>(
                                               std::chrono::steady_clock::now() - planStart)
                                               .count());
+            diag.planningOrders.push_back(planner.lastPlanningOrder());
+            diag.planningAttempts.push_back(planner.lastPlanningAttempt());
         }
         if (!planned.has_value()) {
             notePlanningFailure();
@@ -627,6 +636,8 @@ struct FleetManager::Impl {
         }
         if (diagnosticsEnabled) {
             diag.planningCallMs.push_back(planMs);
+            diag.planningOrders.push_back(planner.lastPlanningOrder());
+            diag.planningAttempts.push_back(planner.lastPlanningAttempt());
         }
         if (!planned.has_value()) {
             notePlanningFailure();
@@ -845,6 +856,7 @@ struct FleetManager::Impl {
         stepsSincePlan++;
         settleArrivals();
         handleArrivals();
+        updateProgress();
 
         const bool outstanding = hasOutstandingWork();
         const bool moved = anyRobotMoved();
@@ -878,6 +890,46 @@ struct FleetManager::Impl {
             }
         }
         return false;
+    }
+
+    /// Returns the total Manhattan distance from every robot with a goal to
+    /// that goal.
+    [[nodiscard]] int totalGoalDistance() const {
+        int total = 0;
+        for (int robot = 0; robot < fleetSize; ++robot) {
+            const auto slot = static_cast<std::size_t>(robot);
+            if (goals[slot] == Goal::Parked) {
+                continue;
+            }
+            total += manhattan_distance(lastStatus[slot].cell, goalCell(robot));
+        }
+        return total;
+    }
+
+    /// Updates the no-progress alarm. Progress is a completed order or a new
+    /// lowest total goal distance; the alarm fires after the configured window
+    /// without either.
+    void updateProgress() {
+        if (config.progressWindowSeconds <= 0.0) {
+            return;
+        }
+        const int distance = totalGoalDistance();
+        if (!hasProgressBaseline) {
+            hasProgressBaseline = true;
+            lastProgressOrders = stats.ordersCompleted;
+            lowestGoalDistance = distance;
+            lastProgressStep = step;
+        } else if (stats.ordersCompleted != lastProgressOrders) {
+            lastProgressOrders = stats.ordersCompleted;
+            lowestGoalDistance = distance;
+            lastProgressStep = step;
+        } else if (distance < lowestGoalDistance) {
+            lowestGoalDistance = distance;
+            lastProgressStep = step;
+        }
+        secondsWithoutProgress = static_cast<double>(step - lastProgressStep) * tickSeconds;
+        noProgress = secondsWithoutProgress >= config.progressWindowSeconds;
+        progressAlarm = progressAlarm || noProgress;
     }
 };
 
@@ -1010,6 +1062,9 @@ judge::Report FleetManager::safetyReport() const {
 ThroughputStats FleetManager::throughput() const {
     const std::lock_guard<std::mutex> lock(impl_->mutex);
     ThroughputStats stats = impl_->stats;
+    stats.noProgress = impl_->noProgress;
+    stats.progressAlarm = impl_->progressAlarm;
+    stats.secondsWithoutProgress = impl_->secondsWithoutProgress;
     stats.ordersOpen = 0;
     for (const ManagedOrder& order : impl_->orders) {
         if (order.state == OrderState::Pending || order.state == OrderState::Assigned ||

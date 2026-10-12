@@ -23,6 +23,95 @@
 namespace lotse::benchmark {
 namespace {
 
+/// Returns the position of a robot id in a planning order, or -1.
+/// @param order the planning order
+/// @param id the robot id
+[[nodiscard]] int orderPosition(const std::vector<int>& order, int id) {
+    const auto found = std::find(order.begin(), order.end(), id);
+    return found == order.end() ? -1 : static_cast<int>(found - order.begin());
+}
+
+/// Describes how often the planning order of the pair that swaps most flips,
+/// and which attempt succeeded.
+/// @param diag the diagnostics recorded during one run
+[[nodiscard]] std::string describePlanningOrder(const core::ManagerDiagnostics& diag) {
+    const std::vector<std::vector<int>>& orders = diag.planningOrders;
+    if (orders.size() < 2) {
+        return {};
+    }
+    std::vector<int> ids;
+    for (const std::vector<int>& order : orders) {
+        for (const int id : order) {
+            if (std::find(ids.begin(), ids.end(), id) == ids.end()) {
+                ids.push_back(id);
+            }
+        }
+    }
+    int bestLeft = -1;
+    int bestRight = -1;
+    int bestFlips = 0;
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        for (std::size_t j = i + 1; j < ids.size(); ++j) {
+            int flips = 0;
+            for (std::size_t k = 1; k < orders.size(); ++k) {
+                const int leftOld = orderPosition(orders[k - 1], ids[i]);
+                const int rightOld = orderPosition(orders[k - 1], ids[j]);
+                const int leftNew = orderPosition(orders[k], ids[i]);
+                const int rightNew = orderPosition(orders[k], ids[j]);
+                if (leftOld < 0 || rightOld < 0 || leftNew < 0 || rightNew < 0) {
+                    continue;
+                }
+                if ((leftOld < rightOld) != (leftNew < rightNew)) {
+                    ++flips;
+                }
+            }
+            if (flips > bestFlips) {
+                bestFlips = flips;
+                bestLeft = ids[i];
+                bestRight = ids[j];
+            }
+        }
+    }
+    int attemptZero = 0;
+    int attemptsRecorded = 0;
+    for (const int attempt : diag.planningAttempts) {
+        if (attempt >= 0) {
+            ++attemptsRecorded;
+            if (attempt == 0) {
+                ++attemptZero;
+            }
+        }
+    }
+    std::string pattern;
+    int lastFirst = -1;
+    int run = 0;
+    for (const std::vector<int>& order : orders) {
+        const int left = orderPosition(order, bestLeft);
+        const int right = orderPosition(order, bestRight);
+        if (left < 0 || right < 0) {
+            continue;
+        }
+        const int first = left < right ? bestLeft : bestRight;
+        if (first == lastFirst) {
+            ++run;
+        } else {
+            if (lastFirst >= 0) {
+                pattern += std::to_string(lastFirst) + "x" + std::to_string(run) + " ";
+            }
+            lastFirst = first;
+            run = 1;
+        }
+    }
+    if (lastFirst >= 0) {
+        pattern += std::to_string(lastFirst) + "x" + std::to_string(run);
+    }
+    std::ostringstream out;
+    out << " planning_order pair=" << bestLeft << '/' << bestRight << " flips=" << bestFlips
+        << " calls=" << orders.size() << " attempt0=" << attemptZero << '/' << attemptsRecorded
+        << " first_sequence=" << pattern;
+    return out.str();
+}
+
 /// Describes which orders are open and where every robot is waiting.
 /// @param manager the stalled manager
 [[nodiscard]] std::string describeStall(const core::FleetManager& manager) {
@@ -52,6 +141,7 @@ namespace {
             << status.target.x << ',' << status.target.y << ") p=" << status.progress << ';';
     }
     out << " routes: " << manager.routeDump();
+    out << describePlanningOrder(manager.diagnostics());
     return out.str();
 }
 
@@ -84,11 +174,12 @@ LivenessOutcome runLivenessScenario(const core::Map& map, const LivenessScenario
     core::NearestRobotAssigner assigner;
     core::PrioritizedPlanner planner(core::PrioritizedOptions{
         core::AgentOrder::FarthestFirst, 0, core::continuousHorizon(map, scenario.fleetSize), 8,
-        500, oneStepGap});
+        500, oneStepGap, scenario.stableOrder});
     core::FleetManagerConfig config;
     config.windowSeconds = scenario.windowSeconds;
     config.priorityAgeingSeconds = scenario.priorityAgeingSeconds;
     config.deadlockPatienceSeconds = scenario.deadlockPatienceSeconds;
+    config.progressWindowSeconds = scenario.progressWindowSeconds;
     config.backgroundPlanning = scenario.backgroundPlanning;
     config.passOrderEnabled = true;
     config.diagnostics = scenario.collectDiagnostics;
@@ -154,6 +245,8 @@ LivenessOutcome runLivenessScenario(const core::Map& map, const LivenessScenario
     outcome.planningFailures = finalStats.planningFailures;
     outcome.planAdoptions = finalStats.planAdoptions;
     outcome.planRejections = finalStats.planRejections;
+    outcome.progressAlarm = finalStats.progressAlarm;
+    outcome.secondsWithoutProgress = finalStats.secondsWithoutProgress;
     outcome.deadlocked = manager.deadlocked();
     outcome.stalled = !outcome.completed;
     outcome.diagnostics = manager.diagnostics();
@@ -219,6 +312,9 @@ void accumulateLiveness(LivenessTotals& totals, const LivenessOutcome& outcome) 
     }
     if (outcome.slow) {
         ++totals.slowRuns;
+    }
+    if (outcome.progressAlarm) {
+        ++totals.progressAlarmRuns;
     }
     if (outcome.collisions > 0) {
         ++totals.collisionRuns;

@@ -197,6 +197,8 @@ public:
             declare_parameter<double>("priority_ageing_seconds", 3.75);
         const double deadlock_patience_seconds =
             declare_parameter<double>("deadlock_patience_seconds", 450.0);
+        const double progress_window_seconds =
+            declare_parameter<double>("progress_window_seconds", 120.0);
         result_path_ = declare_parameter<std::string>("result_path", "/tmp/lotse-isaac-fleet.json");
         const std::string database_path =
             declare_parameter<std::string>("database_path", "/tmp/lotse-isaac-orders.sqlite");
@@ -224,15 +226,16 @@ public:
         }
 
         side_ = std::make_unique<lotse::ros::RosRobotSide>(*this, namespaces, starts, cell_size_);
-        planner_ =
-            std::make_unique<lotse::core::PrioritizedPlanner>(lotse::core::PrioritizedOptions{
-                lotse::core::AgentOrder::FarthestFirst, 0,
-                lotse::core::continuousHorizon(map_, fleet_size_), 8, plan_time_limit_ms, true});
+        planner_ = std::make_unique<lotse::core::PrioritizedPlanner>(
+            lotse::core::PrioritizedOptions{lotse::core::AgentOrder::FarthestFirst, 0,
+                                            lotse::core::continuousHorizon(map_, fleet_size_), 8,
+                                            plan_time_limit_ms, true, true});
         lotse::core::FleetManagerConfig config;
         config.windowSeconds = replan_window_seconds;
         config.planTimeLimitMs = plan_time_limit_ms;
         config.priorityAgeingSeconds = priority_ageing_seconds;
         config.deadlockPatienceSeconds = deadlock_patience_seconds;
+        config.progressWindowSeconds = progress_window_seconds;
         config.backgroundPlanning = false;
         config.passOrderEnabled = true;
         config.diagnostics = true;
@@ -373,6 +376,9 @@ private:
              << ",\"planning_calls\":" << stats.planningCalls
              << ",\"planning_failures\":" << stats.planningFailures
              << ",\"planning_p95_ms\":" << planningP95Ms << ",\"planning_max_ms\":" << planningMaxMs
+             << ",\"no_progress\":" << (stats.noProgress ? "true" : "false")
+             << ",\"progress_alarm\":" << (stats.progressAlarm ? "true" : "false")
+             << ",\"seconds_without_progress\":" << stats.secondsWithoutProgress
              << ",\"plan_adoptions\":" << stats.planAdoptions
              << ",\"plan_rejections\":" << stats.planRejections << ",\"robots_used\":" << robotsUsed
              << ",\"orders_pending\":" << ordersPending << ",\"orders_assigned\":" << ordersAssigned

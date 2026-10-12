@@ -40,6 +40,6 @@ lotse::run bash -lc "
         --cell-seconds '${CELLS}' --seeds '${SEEDS}' --orders '${ORDERS}' \
         --slowdown '${SLOWDOWN}' --stop '${STOP}' --horizon '${HORIZON}' \
         --deadlock '${DEADLOCK}' --stall '${STALL}' --tick '${TICK}' \
-        --background off --gap on --jobs '${JOBS}' \
+        --background off --gap on --stable-order on --progress-window 120 --jobs '${JOBS}' \
         --out-dir results --tag '_current_plans'
 "
