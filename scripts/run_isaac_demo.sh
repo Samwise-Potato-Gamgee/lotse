@@ -15,7 +15,7 @@ ISAAC_IMAGE="${ISAAC_IMAGE:-nvcr.io/nvidia/isaac-sim:5.1.0}"
 ISAAC_NAME="lotse-isaac"
 MANAGER_NAME="lotse-manager"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-77}"
-RUN_NAME="run-${SEED}-${MODE}"
+RUN_NAME="${LOTSE_ISAAC_RUN_NAME:-run-${SEED}-${MODE}}"
 DIST="${REPO_ROOT}/.build/isaac"
 RESULT_DIR="${DIST}/${RUN_NAME}"
 CONTAINER_RESULT_DIR="/workspace/.build/isaac/${RUN_NAME}"
@@ -59,7 +59,8 @@ mkdir -p "${RESULT_DIR}"
 chmod 777 "${RESULT_DIR}"
 rm -f "${RESULT_DIR}/fleet.json" "${RESULT_DIR}/judge.json" \
     "${RESULT_DIR}/scene.json" "${RESULT_DIR}/full.mp4" "${RESULT_DIR}/full_raw.mp4" \
-    "${RESULT_DIR}/clip.mp4" "${RESULT_DIR}/stop"
+    "${RESULT_DIR}/clip.mp4" "${RESULT_DIR}/clip.gif" "${RESULT_DIR}/run_log.jsonl" \
+    "${RESULT_DIR}/frames.jsonl" "${RESULT_DIR}/camera.json" "${RESULT_DIR}/stop"
 
 lotse::build_image
 if [[ ! -f "${REPO_ROOT}/.build/_deps/include/httplib.h" ]]; then
@@ -95,6 +96,8 @@ if [[ "${RECORD}" == "1" ]]; then
     VIDEO_ARGS=(
         --env "LOTSE_VIDEO_PATH=/workspace/.build/isaac/${RUN_NAME}/full_raw.mp4"
         --env "LOTSE_VIDEO_FPS=$(conf_value video_fps)"
+        --env "LOTSE_VIDEO_WIDTH=$(conf_value video_width)"
+        --env "LOTSE_VIDEO_HEIGHT=$(conf_value video_height)"
     )
 fi
 
@@ -205,19 +208,26 @@ fi
 if [[ -f "${RESULT_DIR}/full_raw.mp4" ]]; then
     MEDIA_ROOT="$(cd "${REPO_ROOT}/.." && pwd)"
     mkdir -p "${MEDIA_ROOT}/media" "${REPO_ROOT}/media"
-    echo "encoding H.264 video and stills ..."
+    echo "encoding H.264 video, clip, GIF and stills ..."
     python3 "${REPO_ROOT}/scripts/encode_video.py" \
         --input "${RESULT_DIR}/full_raw.mp4" \
         --full "${RESULT_DIR}/full.mp4" \
         --clip "${RESULT_DIR}/clip.mp4" \
+        --gif "${RESULT_DIR}/clip.gif" \
+        --camera "${RESULT_DIR}/camera.json" \
+        --run-log "${RESULT_DIR}/run_log.jsonl" \
+        --frames-log "${RESULT_DIR}/frames.jsonl" \
+        --map "$(conf_value map_path)" \
         --stills-dir "${MEDIA_ROOT}/media" \
         --stills-prefix isaac_demo_still \
         --fps "$(conf_value video_fps)" || true
     cp "${RESULT_DIR}/full.mp4" "${MEDIA_ROOT}/media/isaac_demo_full.mp4"
     cp "${RESULT_DIR}/clip.mp4" "${REPO_ROOT}/media/isaac_demo_clip.mp4"
+    cp "${RESULT_DIR}/clip.gif" "${REPO_ROOT}/media/isaac_demo_wait.gif"
     cp "${MEDIA_ROOT}/media/isaac_demo_still_1.png" \
         "${REPO_ROOT}/media/isaac_demo_still.png"
     echo "  video: ${MEDIA_ROOT}/media/isaac_demo_full.mp4"
     echo "  clip:  ${REPO_ROOT}/media/isaac_demo_clip.mp4"
+    echo "  gif:   ${REPO_ROOT}/media/isaac_demo_wait.gif"
     echo "  still: ${REPO_ROOT}/media/isaac_demo_still.png"
 fi
