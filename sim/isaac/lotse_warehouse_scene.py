@@ -29,8 +29,18 @@ OBSTACLE_DISTANCE = float(os.environ.get("LOTSE_OBSTACLE_DISTANCE", "0.48"))
 ROBOT_RADIUS = float(os.environ.get("LOTSE_ROBOT_RADIUS", "0.25"))
 VIDEO_PATH = os.environ.get("LOTSE_VIDEO_PATH", "")
 VIDEO_FPS = float(os.environ.get("LOTSE_VIDEO_FPS", "10"))
-VIDEO_WIDTH = int(os.environ.get("LOTSE_VIDEO_WIDTH", "640"))
-VIDEO_HEIGHT = int(os.environ.get("LOTSE_VIDEO_HEIGHT", "480"))
+VIDEO_WIDTH = int(os.environ.get("LOTSE_VIDEO_WIDTH", "1280"))
+VIDEO_HEIGHT = int(os.environ.get("LOTSE_VIDEO_HEIGHT", "720"))
+CAMERA_MARGIN_M = float(os.environ.get("LOTSE_CAMERA_MARGIN_M", "0.5"))
+CAMERA_PATH = os.path.join(os.path.dirname(RESULT_PATH), "camera.json")
+
+ROBOT_COLOURS = [(0.90, 0.12, 0.12), (0.12, 0.42, 0.95),
+                 (0.10, 0.72, 0.20), (0.85, 0.20, 0.85)]
+WALL_COLOUR = (0.16, 0.18, 0.24)
+FLOOR_COLOUR = (0.84, 0.85, 0.87)
+PICKUP_COLOUR = (0.05, 0.65, 0.25)
+DROPOFF_COLOUR = (0.95, 0.42, 0.03)
+PARKING_COLOUR = (0.15, 0.30, 0.95)
 
 simulation_app = SimulationApp({"renderer": "RaytracedLighting", "headless": HEADLESS})
 
@@ -88,7 +98,7 @@ def cell_centre(cell):
     return ((cell[0] + 0.5) * CELL_SIZE, (cell[1] + 0.5) * CELL_SIZE)
 
 
-def add_marker(stage, path, x, y, colour, size):
+def add_marker(stage, path, x, y, colour, size, height=0.015):
     """Adds a flat coloured marker that carries no collision.
     @param stage the USD stage
     @param path the prim path
@@ -96,11 +106,27 @@ def add_marker(stage, path, x, y, colour, size):
     @param y the marker y in metres
     @param colour the display colour
     @param size the marker side in metres
+    @param height the marker centre height in metres
     """
     cube = UsdGeom.Cube.Define(stage, path)
     cube.GetSizeAttr().Set(size)
-    UsdGeom.Xformable(cube.GetPrim()).AddTranslateOp().Set(Gf.Vec3d(x, y, 0.02))
+    UsdGeom.Xformable(cube.GetPrim()).AddTranslateOp().Set(Gf.Vec3d(x, y, height))
     cube.GetDisplayColorAttr().Set([Gf.Vec3f(*colour)])
+
+
+def add_floor(stage, map_data):
+    """Adds a coloured floor over the whole warehouse, with no collision.
+    @param stage the USD stage
+    @param map_data the map returned by read_map
+    """
+    floor = UsdGeom.Cube.Define(stage, "/World/floor")
+    floor.GetSizeAttr().Set(1.0)
+    xform = UsdGeom.Xformable(floor.GetPrim())
+    xform.AddTranslateOp().Set(Gf.Vec3d(map_data["width"] * CELL_SIZE / 2.0,
+                                        map_data["height"] * CELL_SIZE / 2.0, -0.01))
+    xform.AddScaleOp().Set(Gf.Vec3d(map_data["width"] * CELL_SIZE,
+                                    map_data["height"] * CELL_SIZE, 0.02))
+    floor.GetDisplayColorAttr().Set([Gf.Vec3f(*FLOOR_COLOUR)])
 
 
 def build_warehouse(stage, map_data):
@@ -111,6 +137,7 @@ def build_warehouse(stage, map_data):
     PhysicsSchemaTools.addGroundPlane(
         stage, "/World/groundPlane", "Z", 1000, Gf.Vec3f(0, 0, 0), Gf.Vec3f(0.5)
     )
+    add_floor(stage, map_data)
     for y, row in enumerate(map_data["rows"]):
         for x, cell in enumerate(row):
             if cell != "#":
@@ -121,14 +148,15 @@ def build_warehouse(stage, map_data):
             UsdGeom.Xformable(cube.GetPrim()).AddTranslateOp().Set(
                 Gf.Vec3d(cx, cy, CELL_SIZE / 2.0)
             )
+            cube.GetDisplayColorAttr().Set([Gf.Vec3f(*WALL_COLOUR)])
             UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
     for name, x, y in map_data["stations"]:
-        colour = (0.32, 0.79, 0.54) if name.startswith("pickup") else (0.94, 0.64, 0.29)
-        add_marker(stage, f"/World/station_{name}", *cell_centre((x, y)), colour, CELL_SIZE * 0.6)
+        colour = PICKUP_COLOUR if name.startswith("pickup") else DROPOFF_COLOUR
+        add_marker(stage, f"/World/station_{name}", *cell_centre((x, y)), colour, CELL_SIZE * 0.8)
     for index, (x, y) in enumerate(map_data["parking"]):
         add_marker(
-            stage, f"/World/parking_{index}", *cell_centre((x, y)), (0.44, 0.50, 0.57),
-            CELL_SIZE * 0.6,
+            stage, f"/World/parking_{index}", *cell_centre((x, y)), PARKING_COLOUR,
+            CELL_SIZE * 0.8,
         )
 
 
@@ -227,6 +255,33 @@ def robot_world_pose(stage, robot_prim):
     position = matrix.ExtractTranslation()
     forward = matrix.TransformDir(Gf.Vec3d(1.0, 0.0, 0.0)).GetNormalized()
     return position, forward
+
+
+def build_robot_discs(stage, map_data):
+    """Adds one coloured disc on top of every robot, with no collision.
+    @param stage the USD stage
+    @param map_data the map returned by read_map
+    """
+    discs = []
+    for index in range(FLEET_SIZE):
+        disc = UsdGeom.Cylinder.Define(stage, f"/World/robot_disc_{index}")
+        disc.GetRadiusAttr().Set(0.34)
+        disc.GetHeightAttr().Set(0.05)
+        UsdGeom.Xformable(disc.GetPrim()).AddTranslateOp()
+        disc.GetDisplayColorAttr().Set([Gf.Vec3f(*ROBOT_COLOURS[index % len(ROBOT_COLOURS)])])
+        discs.append(f"/World/robot_disc_{index}")
+    return discs
+
+
+def update_robot_discs(stage, robots, discs):
+    """Moves every coloured disc to sit just above its robot's chassis.
+    @param stage the USD stage
+    @param robots the robot prim paths
+    @param discs the disc prim paths
+    """
+    for robot_prim, disc_path in zip(robots, discs):
+        position, _ = robot_world_pose(stage, robot_prim)
+        set_translation(stage.GetPrimAtPath(disc_path), position[0], position[1], 0.45)
 
 
 def start_robot_publishers(namespaces):
@@ -369,19 +424,44 @@ def update_obstacle(stage, prim, seconds, position, forward):
 
 
 def create_overhead_camera(stage, map_data):
-    """Adds a fixed overhead camera that frames the whole warehouse.
+    """Adds a top-down perspective camera that frames the warehouse tightly.
     @param stage the USD stage
     @param map_data the map returned by read_map
     """
     camera = UsdGeom.Camera.Define(stage, "/World/OverheadCamera")
-    camera.GetClippingRangeAttr().Set(Gf.Vec2f(0.1, 10000.0))
+    camera.GetProjectionAttr().Set("perspective")
     camera.GetFocalLengthAttr().Set(20.0)
-    camera.GetHorizontalApertureAttr().Set(36.0)
+    camera.GetClippingRangeAttr().Set(Gf.Vec2f(0.1, 10000.0))
+    half_height = (map_data["height"] * CELL_SIZE + CAMERA_MARGIN_M) / 2.0
+    half_width = half_height * VIDEO_WIDTH / VIDEO_HEIGHT
+    height = 60.0
+    camera.GetHorizontalApertureAttr().Set(2.0 * 20.0 * half_width / height)
+    camera.GetVerticalApertureAttr().Set(2.0 * 20.0 * half_height / height)
     centre_x = map_data["width"] * CELL_SIZE / 2.0
     centre_y = map_data["height"] * CELL_SIZE / 2.0
-    height = max(map_data["width"], map_data["height"]) * CELL_SIZE * 0.9 + 4.0
     UsdGeom.Xformable(camera.GetPrim()).AddTranslateOp().Set(Gf.Vec3d(centre_x, centre_y, height))
     return "/World/OverheadCamera"
+
+
+def write_camera(centre_x, centre_y, half_width, half_height):
+    """Writes the overhead camera framing so the encoder can project positions.
+    @param centre_x the camera centre x in metres
+    @param centre_y the camera centre y in metres
+    @param half_width half the visible width in metres
+    @param half_height half the visible height in metres
+    """
+    with open(CAMERA_PATH, "w") as handle:
+        json.dump(
+            {
+                "centre_x": centre_x,
+                "centre_y": centre_y,
+                "half_width_m": half_width,
+                "half_height_m": half_height,
+                "image_width": VIDEO_WIDTH,
+                "image_height": VIDEO_HEIGHT,
+            },
+            handle,
+        )
 
 
 def add_light(stage):
@@ -389,13 +469,13 @@ def add_light(stage):
     @param stage the USD stage
     """
     light = UsdLux.DistantLight.Define(stage, "/World/DistantLight")
-    light.GetIntensityAttr().Set(3000.0)
+    light.GetIntensityAttr().Set(2500.0)
     light.GetColorAttr().Set(Gf.Vec3f(1.0, 1.0, 1.0))
     UsdGeom.Xformable(light.GetPrim()).AddRotateXYZOp().Set(Gf.Vec3f(-45.0, 0.0, 0.0))
 
 
 def start_video(camera_path):
-    """Starts writing overhead frames to an mp4 and returns the writer and annotator.
+    """Starts writing overhead frames to an mp4 and returns the writer, annotator and log.
     @param camera_path the overhead camera prim path
     """
     render_product = rep.create.render_product(camera_path, [VIDEO_WIDTH, VIDEO_HEIGHT])
@@ -404,7 +484,8 @@ def start_video(camera_path):
     writer = cv2.VideoWriter(
         VIDEO_PATH, cv2.VideoWriter_fourcc(*"mp4v"), VIDEO_FPS, (VIDEO_WIDTH, VIDEO_HEIGHT)
     )
-    return writer, annotator
+    frame_log = open(os.path.join(os.path.dirname(VIDEO_PATH), "frames.jsonl"), "w")
+    return writer, annotator, frame_log
 
 
 def real_contact_count(sensor, robot_prim):
@@ -463,6 +544,10 @@ def main():
     build_warehouse(stage, map_data)
     add_light(stage)
     camera_path = create_overhead_camera(stage, map_data)
+    half_height = (map_data["height"] * CELL_SIZE + CAMERA_MARGIN_M) / 2.0
+    half_width = half_height * VIDEO_WIDTH / VIDEO_HEIGHT
+    write_camera(map_data["width"] * CELL_SIZE / 2.0, map_data["height"] * CELL_SIZE / 2.0,
+                 half_width, half_height)
 
     robots = []
     contact_sensors = []
@@ -471,6 +556,7 @@ def main():
         add_reference_to_stage(assets_root + ROBOT_USD, robot_prim)
         place_robot(stage, robot_prim, *cell_centre(map_data["parking"][index]))
         robots.append(robot_prim)
+    discs = build_robot_discs(stage, map_data)
     simulation_app.update()
 
     simulation_context = SimulationContext(stage_units_in_meters=1.0)
@@ -512,12 +598,14 @@ def main():
 
     video_writer = None
     rgb_annotator = None
+    frame_log = None
     if VIDEO_PATH:
-        video_writer, rgb_annotator = start_video(camera_path)
+        video_writer, rgb_annotator, frame_log = start_video(camera_path)
 
     contacts = 0
     contact_frames = 0
     frames = 0
+    captured = 0
     next_capture = 0.5
     next_result = 0.0
     start = time.monotonic()
@@ -529,6 +617,7 @@ def main():
         seconds = simulation_context.current_time
         position, forward = robot_world_pose(stage, robots[0])
         update_obstacle(stage, obstacle.GetPrim(), seconds, position, forward)
+        update_robot_discs(stage, robots, discs)
         if video_writer is not None:
             rep.orchestrator.step(pause_timeline=False)
         else:
@@ -540,6 +629,8 @@ def main():
             frame = rgb_annotator.get_data()
             if frame is not None and np.asarray(frame).size > 0:
                 video_writer.write(cv2.cvtColor(np.asarray(frame), cv2.COLOR_RGBA2BGR))
+                frame_log.write(json.dumps({"frame": captured, "t": seconds}) + "\n")
+                captured += 1
             next_capture = seconds + 1.0 / VIDEO_FPS
         frames += 1
         step_contacts = sum(
@@ -556,6 +647,7 @@ def main():
     seconds = simulation_context.current_time
     if video_writer is not None:
         video_writer.release()
+        frame_log.close()
     write_result(contacts, contact_frames, frames, seconds, time.monotonic() - start)
     print(f"LOTSE_ISAAC_DONE contacts={contacts} frames={frames} sim={seconds:.2f}", flush=True)
     truth_node.destroy_node()
