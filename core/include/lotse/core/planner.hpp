@@ -1,5 +1,5 @@
-// The fleet planner interface. Prioritized planning implements it now, conflict
-// based search will implement it in a later stage.
+// The fleet planner interface. Prioritized planning and conflict-based search
+// both implement it.
 
 #pragma once
 
