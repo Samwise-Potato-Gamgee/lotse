@@ -83,6 +83,7 @@ struct ManagerDiagnostics {
     std::vector<double> cellOccupiedWaitSeconds;
     std::vector<double> passOrderWaitSeconds;
     std::vector<double> noWaypointSeconds;
+    std::vector<double> planningCallMs;
     int rightOfWayFlips = 0;
     int rightOfWayComparisons = 0;
     int planningTimeouts = 0;

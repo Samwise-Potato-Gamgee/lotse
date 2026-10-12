@@ -129,6 +129,7 @@ struct FleetManager::Impl {
     std::optional<PlanRequest> request;
     bool resultReady = false;
     std::optional<Plan> result;
+    double lastPlanMs = 0.0;
 
     Impl(const Map& warehouse, RobotSide& robotSide, Planner& fleetPlanner,
          TaskAssigner& taskAssigner, Clock& timeSource, FleetManagerConfig managerConfig,
@@ -207,13 +208,18 @@ struct FleetManager::Impl {
                 requestWaiting = false;
                 busy = true;
             }
+            const auto planStart = std::chrono::steady_clock::now();
             std::optional<Plan> planned = planner.plan(job.map, job.agents);
             if (!planned.has_value() && fallback != nullptr) {
                 planned = fallback->plan(job.map, job.agents);
             }
+            const double planMs = std::chrono::duration<double, std::milli>(
+                                      std::chrono::steady_clock::now() - planStart)
+                                      .count();
             {
                 const std::lock_guard<std::mutex> lock(workMutex);
                 result = std::move(planned);
+                lastPlanMs = planMs;
                 resultReady = true;
                 busy = false;
             }
@@ -523,9 +529,15 @@ struct FleetManager::Impl {
             return;
         }
         const std::vector<int> robotIds = job.robotIds;
+        const auto planStart = std::chrono::steady_clock::now();
         std::optional<Plan> planned = planner.plan(job.map, job.agents);
         if (!planned.has_value() && fallback != nullptr) {
             planned = fallback->plan(job.map, job.agents);
+        }
+        if (diagnosticsEnabled) {
+            diag.planningCallMs.push_back(std::chrono::duration<double, std::milli>(
+                                              std::chrono::steady_clock::now() - planStart)
+                                              .count());
         }
         if (!planned.has_value()) {
             notePlanningFailure();
@@ -601,6 +613,7 @@ struct FleetManager::Impl {
     void collectPlan() {
         std::optional<Plan> planned;
         std::vector<int> robotIds;
+        double planMs = 0.0;
         {
             const std::lock_guard<std::mutex> lock(workMutex);
             if (!resultReady) {
@@ -610,6 +623,10 @@ struct FleetManager::Impl {
             result.reset();
             resultReady = false;
             robotIds = requestIds;
+            planMs = lastPlanMs;
+        }
+        if (diagnosticsEnabled) {
+            diag.planningCallMs.push_back(planMs);
         }
         if (!planned.has_value()) {
             notePlanningFailure();

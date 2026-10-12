@@ -3,7 +3,9 @@
 // the manager, and writes a small result file so the integration script can read
 // the counters. It shuts the whole launch down when the orders are done.
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -26,6 +28,18 @@
 #include "lotse_ros/ros_robot_side.hpp"
 
 namespace {
+
+/// Returns the nearest-rank percentile of a non-empty sample.
+/// @param samples the values to rank
+/// @param percentile the percentile in [0, 1]
+[[nodiscard]] double percentile(const std::vector<double>& samples, double percentile) {
+    std::vector<double> sorted = samples;
+    std::sort(sorted.begin(), sorted.end());
+    const auto count = static_cast<double>(sorted.size());
+    const auto rank = static_cast<std::size_t>(std::ceil(percentile * count));
+    const std::size_t index = rank == 0 ? 0 : std::min(rank - 1, sorted.size() - 1);
+    return sorted[index];
+}
 
 /// Runs the real-time manager against the ROS 2 robots.
 class FleetNode final : public rclcpp::Node {
@@ -75,8 +89,9 @@ public:
         config.planTimeLimitMs = plan_time_limit_ms;
         config.priorityAgeingSeconds = priority_ageing_seconds;
         config.deadlockPatienceSeconds = deadlock_patience_seconds;
-        config.backgroundPlanning = true;
+        config.backgroundPlanning = false;
         config.passOrderEnabled = true;
+        config.diagnostics = true;
         manager_ = std::make_unique<lotse::core::FleetManager>(map_, *side_, *planner_, assigner_,
                                                                clock_, config);
 
@@ -139,6 +154,11 @@ private:
             std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start_).count();
         const lotse::core::ThroughputStats stats = manager_->throughput();
         const lotse::judge::Report report = manager_->safetyReport();
+        const lotse::core::ManagerDiagnostics diagnostics = manager_->diagnostics();
+        const double planningP95Ms =
+            diagnostics.planningCallMs.empty() ? 0.0 : percentile(diagnostics.planningCallMs, 0.95);
+        const double planningMaxMs =
+            diagnostics.planningCallMs.empty() ? 0.0 : percentile(diagnostics.planningCallMs, 1.0);
         std::vector<bool> robotUsed(static_cast<std::size_t>(fleet_size_), false);
         for (const lotse::core::ManagedOrder& order : manager_->orders()) {
             if (order.state == lotse::core::OrderState::Completed && order.robot >= 0) {
@@ -176,6 +196,7 @@ private:
              << ",\"sim_seconds\":" << simSeconds << ",\"wall_seconds\":" << wallSeconds
              << ",\"planning_calls\":" << stats.planningCalls
              << ",\"planning_failures\":" << stats.planningFailures
+             << ",\"planning_p95_ms\":" << planningP95Ms << ",\"planning_max_ms\":" << planningMaxMs
              << ",\"plan_adoptions\":" << stats.planAdoptions
              << ",\"plan_rejections\":" << stats.planRejections << ",\"robots_used\":" << robotsUsed
              << ",\"orders_pending\":" << ordersPending << ",\"orders_assigned\":" << ordersAssigned
