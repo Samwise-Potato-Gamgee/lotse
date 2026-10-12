@@ -29,15 +29,15 @@ RENDERED_DROPOFF_COLOUR_BGR = (51, 214, 238)
 RENDERED_PARKING_COLOUR_BGR = (238, 199, 155)
 
 WAIT_OCCUPIED_COLOUR_BGR = (0, 0, 0)
-WAIT_RIGHT_OF_WAY_COLOUR_BGR = (255, 0, 0)
+WAIT_RIGHT_OF_WAY_COLOUR_BGR = (255, 190, 0)
 WAIT_COLOURS_BGR = {"cell_occupied": WAIT_OCCUPIED_COLOUR_BGR,
                     "pass_order": WAIT_RIGHT_OF_WAY_COLOUR_BGR}
 WAIT_LABELS = {"cell_occupied": ("waiting: next cell", "still occupied"),
                "pass_order": ("waiting: right of way",)}
 BAR_COLOUR_BGR = (25, 25, 25)
-PANEL_COLOUR_BGR = (228, 228, 231)
-PANEL_TEXT_BGR = (30, 30, 35)
-PANEL_EDGE_BGR = (110, 110, 118)
+PANEL_COLOUR_BGR = (42, 42, 46)
+PANEL_TEXT_BGR = (255, 255, 255)
+PANEL_EDGE_BGR = (205, 205, 210)
 
 HIGH_PROFILES = {100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135}
 
@@ -357,21 +357,24 @@ def to_frame(layout, camera, x, y):
     return int(round(u)), int(round(v))
 
 
-def compose_frame(raw, layout):
-    """Crops the empty margin and scales the warehouse into the scene area.
+def compose_frame(raw, layout, render_scale):
+    """Crops the margin and scales the warehouse into the scene area at the output size.
     @param raw the raw scene frame
     @param layout the scene layout
+    @param render_scale the output size as a fraction of the composed size
     """
     x0 = int(round(layout["crop_x0"]))
     y0 = int(round(layout["crop_y0"]))
     x1 = int(round(layout["crop_x0"] + layout["crop_w"]))
     y1 = int(round(layout["crop_y0"] + layout["crop_h"]))
-    target_w = int(round(layout["crop_w"] * layout["scale"]))
-    target_h = int(round(layout["crop_h"] * layout["scale"]))
+    target_w = max(1, int(round(layout["crop_w"] * layout["scale"] * render_scale)))
+    target_h = max(1, int(round(layout["crop_h"] * layout["scale"] * render_scale)))
     scene = cv2.resize(raw[y0:y1, x0:x1], (target_w, target_h), interpolation=cv2.INTER_AREA)
-    canvas = np.full((raw.shape[0], raw.shape[1], 3), FRAME_COLOUR_BGR, np.uint8)
-    off_x = int(round(layout["off_x"]))
-    off_y = int(round(layout["off_y"]))
+    canvas_w = max(1, int(round(raw.shape[1] * render_scale)))
+    canvas_h = max(1, int(round(raw.shape[0] * render_scale)))
+    canvas = np.full((canvas_h, canvas_w, 3), FRAME_COLOUR_BGR, np.uint8)
+    off_x = int(round(layout["off_x"] * render_scale))
+    off_y = int(round(layout["off_y"] * render_scale))
     canvas[off_y:off_y + target_h, off_x:off_x + target_w] = scene
     return canvas
 
@@ -393,64 +396,121 @@ def state_at(log, time):
     return best
 
 
-def draw_label(frame, text, origin, scale, colour):
-    """Draws text with a dark outline so it stays readable on any floor.
+def frame_point(layout, camera, x, y, render_scale):
+    """Projects a world position into the composed frame at the output scale.
+    @param layout the scene layout
+    @param camera the camera framing dictionary
+    @param x the world x in metres
+    @param y the world y in metres
+    @param render_scale the output size as a fraction of the composed size
+    """
+    u, v = to_frame(layout, camera, x, y)
+    return int(round(u * render_scale)), int(round(v * render_scale))
+
+
+def draw_outlined_text(frame, text, origin, scale, colour, render_scale):
+    """Draws light text with a thin dark outline for the scene area.
+    @param frame the image to draw on
+    @param text the text
+    @param origin the (x, y) of the text baseline's left edge
+    @param scale the font scale
+    @param colour the text colour in BGR
+    @param render_scale the output size as a fraction of the composed size
+    """
+    outline = max(2, int(round(3 * render_scale)))
+    cv2.putText(frame, text, origin, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), outline,
+                cv2.LINE_AA)
+    cv2.putText(frame, text, origin, cv2.FONT_HERSHEY_SIMPLEX, scale, colour, 1, cv2.LINE_AA)
+
+
+def draw_panel_text(frame, text, origin, scale, colour):
+    """Draws panel text with no outline so it stays sharp on the dark panel.
     @param frame the image to draw on
     @param text the text
     @param origin the (x, y) of the text baseline's left edge
     @param scale the font scale
     @param colour the text colour in BGR
     """
-    cv2.putText(frame, text, origin, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 3, cv2.LINE_AA)
     cv2.putText(frame, text, origin, cv2.FONT_HERSHEY_SIMPLEX, scale, colour, 1, cv2.LINE_AA)
 
 
-def draw_top_bar(frame, state, total_orders, speed_text):
+def draw_ring(frame, centre, radius, colour, render_scale):
+    """Draws a wait marker ring with a light edge so it shows on any background.
+    @param frame the image to draw on
+    @param centre the (x, y) ring centre
+    @param radius the ring radius in pixels
+    @param colour the ring colour in BGR
+    @param render_scale the output size as a fraction of the composed size
+    """
+    edge = max(2, int(round(5 * render_scale)))
+    core = max(1, int(round(3 * render_scale)))
+    cv2.circle(frame, centre, radius, PANEL_EDGE_BGR, edge, cv2.LINE_AA)
+    cv2.circle(frame, centre, radius, colour, core, cv2.LINE_AA)
+
+
+def draw_top_bar(frame, state, total_orders, speed_text, render_scale):
     """Draws simulated time, orders done and the playback speed along the top.
     @param frame the image to draw on
     @param state the run-log frame
     @param total_orders how many orders the run releases
     @param speed_text the playback speed text
+    @param render_scale the output size as a fraction of the composed size
     """
     width = frame.shape[1]
+    bar_height = int(round(HEADER_HEIGHT * render_scale))
     panel = frame.copy()
-    cv2.rectangle(panel, (0, 0), (width, HEADER_HEIGHT), BAR_COLOUR_BGR, -1)
+    cv2.rectangle(panel, (0, 0), (width, bar_height), BAR_COLOUR_BGR, -1)
     cv2.addWeighted(panel, 0.80, frame, 0.20, 0, frame)
     text = ("simulated time %.1f s     orders %d / %d     playback %s"
             % (state["t"], state["done"], total_orders, speed_text))
-    draw_label(frame, text, (14, 32), 0.72, (255, 255, 255))
+    draw_panel_text(frame, text, (int(round(14 * render_scale)), int(round(32 * render_scale))),
+                    0.72 * render_scale, (255, 255, 255))
 
 
-def draw_stations(frame, layout, camera, stations):
-    """Draws every named station on its cell, clamped inside the frame.
+def draw_stations(frame, layout, camera, stations, render_scale):
+    """Draws every named station on its cell, clamped inside the scene area.
     @param frame the image to draw on
     @param layout the scene layout
     @param camera the camera framing dictionary
     @param stations the (name, x, y) stations
+    @param render_scale the output size as a fraction of the composed size
     """
     height, width = frame.shape[:2]
+    scene_right = width - int(round(LEGEND_WIDTH * render_scale))
     for name, x, y in stations:
-        u, v = to_frame(layout, camera, x + 0.5, y + 0.5)
-        origin_x = min(max(u - 30, 2), width - LEGEND_WIDTH - 70)
-        origin_y = min(max(v + 34, HEADER_HEIGHT + 14), height - 6)
-        draw_label(frame, name, (origin_x, origin_y), 0.45, (255, 255, 255))
+        u, v = frame_point(layout, camera, x + 0.5, y + 0.5, render_scale)
+        origin_x = min(max(u - int(round(30 * render_scale)), 2),
+                       scene_right - int(round(70 * render_scale)))
+        origin_y = min(max(v + int(round(34 * render_scale)),
+                           int(round((HEADER_HEIGHT + 14) * render_scale))),
+                       height - int(round(6 * render_scale)))
+        draw_outlined_text(frame, name, (origin_x, origin_y), 0.45 * render_scale,
+                           (255, 255, 255), render_scale)
 
 
-def draw_robots(frame, layout, camera, state):
+def draw_robots(frame, layout, camera, state, render_scale):
     """Draws each robot's number and a coloured ring for either wait reason.
     @param frame the image to draw on
     @param layout the scene layout
     @param camera the camera framing dictionary
     @param state the run-log frame
+    @param render_scale the output size as a fraction of the composed size
     """
     for robot in state["robots"]:
-        u, v = to_frame(layout, camera, robot["x"], robot["y"])
+        u, v = frame_point(layout, camera, robot["x"], robot["y"], render_scale)
         colour = WAIT_COLOURS_BGR.get(robot["wait"])
         if colour is not None:
-            cv2.circle(frame, (u, v), 23, (255, 255, 255), 7, cv2.LINE_AA)
-            cv2.circle(frame, (u, v), 23, colour, 4, cv2.LINE_AA)
-        label_x = min(max(u + 13, 2), frame.shape[1] - LEGEND_WIDTH - 30)
-        draw_label(frame, "R%d" % robot["id"], (label_x, v - 15), 0.55, (255, 255, 255))
+            radius = int(round(23 * render_scale))
+            cv2.circle(frame, (u, v), radius, (255, 255, 255),
+                       max(2, int(round(7 * render_scale))), cv2.LINE_AA)
+            cv2.circle(frame, (u, v), radius, colour,
+                       max(2, int(round(4 * render_scale))), cv2.LINE_AA)
+        label_x = min(max(u + int(round(13 * render_scale)), 2),
+                      frame.shape[1] - int(round(LEGEND_WIDTH * render_scale))
+                      - int(round(30 * render_scale)))
+        draw_outlined_text(frame, "R%d" % robot["id"],
+                           (label_x, v - int(round(15 * render_scale))),
+                           0.55 * render_scale, (255, 255, 255), render_scale)
 
 
 def robot_task_text(robot):
@@ -462,68 +522,80 @@ def robot_task_text(robot):
     return "to %s %s" % (robot["phase"], robot["station"])
 
 
-def draw_swatch(frame, left, row, colour):
-    """Draws a legend colour swatch with a dark border so pastel colours read.
+def draw_swatch(frame, left, row, colour, render_scale):
+    """Draws a legend colour swatch with a light border so it stands out.
     @param frame the image to draw on
     @param left the panel left edge
     @param row the swatch text baseline
     @param colour the swatch colour in BGR
+    @param render_scale the output size as a fraction of the composed size
     """
-    cv2.rectangle(frame, (left + 10, row - 12), (left + 28, row + 2), PANEL_EDGE_BGR, -1)
-    cv2.rectangle(frame, (left + 11, row - 11), (left + 27, row + 1), colour, -1)
+    x0 = left + int(round(10 * render_scale))
+    x1 = left + int(round(28 * render_scale))
+    y0 = row - int(round(12 * render_scale))
+    y1 = row + int(round(2 * render_scale))
+    cv2.rectangle(frame, (x0, y0), (x1, y1), PANEL_EDGE_BGR, -1)
+    cv2.rectangle(frame, (x0 + 1, y0 + 1), (x1 - 1, y1 - 1), colour, -1)
 
 
-def draw_legend(frame, layout, state, map_data):
+def draw_legend(frame, layout, state, map_data, render_scale):
     """Draws the colour legend and the two waiting markers on the right.
     @param frame the image to draw on
     @param layout the scene layout
     @param state the run-log frame
     @param map_data the map dictionary
+    @param render_scale the output size as a fraction of the composed size
     """
     height, width = frame.shape[:2]
-    left = width - LEGEND_WIDTH
-    panel = frame.copy()
-    cv2.rectangle(panel, (left, HEADER_HEIGHT), (width, height), PANEL_COLOUR_BGR, -1)
-    cv2.addWeighted(panel, 0.88, frame, 0.12, 0, frame)
-    cv2.line(frame, (left, HEADER_HEIGHT), (left, height), PANEL_EDGE_BGR, 1)
-    row = HEADER_HEIGHT + 28
-    draw_label(frame, "Lotse fleet", (left + 10, row), 0.52, PANEL_TEXT_BGR)
-    row += 26
+    left = width - int(round(LEGEND_WIDTH * render_scale))
+    top = int(round(HEADER_HEIGHT * render_scale))
+    cv2.rectangle(frame, (left, top), (width, height), PANEL_COLOUR_BGR, -1)
+    cv2.line(frame, (left, top), (left, height), PANEL_EDGE_BGR, 1)
+    text_left = left + int(round(36 * render_scale))
+    row = top + int(round(28 * render_scale))
+    draw_panel_text(frame, "Lotse fleet", (left + int(round(12 * render_scale)), row),
+                    0.58 * render_scale, PANEL_TEXT_BGR)
+    row += int(round(28 * render_scale))
     for robot in state["robots"]:
         colour = RENDERED_ROBOT_COLOURS_BGR[robot["id"] % len(RENDERED_ROBOT_COLOURS_BGR)]
-        draw_swatch(frame, left, row, colour)
-        draw_label(frame, "R%d" % robot["id"], (left + 36, row), 0.48, PANEL_TEXT_BGR)
-        row += 20
-        draw_label(frame, robot_task_text(robot), (left + 36, row), 0.42, PANEL_TEXT_BGR)
-        row += 20
+        draw_swatch(frame, left, row, colour, render_scale)
+        draw_panel_text(frame, "R%d" % robot["id"], (text_left, row), 0.52 * render_scale,
+                        PANEL_TEXT_BGR)
+        row += int(round(21 * render_scale))
+        draw_panel_text(frame, robot_task_text(robot), (text_left, row), 0.46 * render_scale,
+                        PANEL_TEXT_BGR)
+        row += int(round(21 * render_scale))
         for line in WAIT_LABELS.get(robot["wait"], ()):
-            draw_label(frame, line, (left + 36, row), 0.40, WAIT_COLOURS_BGR[robot["wait"]])
-            row += 17
-        row += 12
-    row += 4
+            draw_panel_text(frame, line, (text_left, row), 0.44 * render_scale, PANEL_TEXT_BGR)
+            row += int(round(18 * render_scale))
+        row += int(round(12 * render_scale))
+    row += int(round(4 * render_scale))
     for name, colour in (("pickup", RENDERED_PICKUP_COLOUR_BGR),
                          ("dropoff", RENDERED_DROPOFF_COLOUR_BGR),
                          ("parking", RENDERED_PARKING_COLOUR_BGR)):
-        draw_swatch(frame, left, row, colour)
-        draw_label(frame, name, (left + 36, row), 0.44, PANEL_TEXT_BGR)
-        row += 24
-    row += 8
-    cv2.circle(frame, (left + 19, row - 5), 9, PANEL_EDGE_BGR, 5, cv2.LINE_AA)
-    cv2.circle(frame, (left + 19, row - 5), 9, WAIT_OCCUPIED_COLOUR_BGR, 3, cv2.LINE_AA)
+        draw_swatch(frame, left, row, colour, render_scale)
+        draw_panel_text(frame, name, (text_left, row), 0.48 * render_scale, PANEL_TEXT_BGR)
+        row += int(round(24 * render_scale))
+    row += int(round(8 * render_scale))
+    marker_x = left + int(round(19 * render_scale))
+    marker_radius = int(round(9 * render_scale))
+    draw_ring(frame, (marker_x, row - int(round(5 * render_scale))), marker_radius,
+              WAIT_OCCUPIED_COLOUR_BGR, render_scale)
     for line in WAIT_LABELS["cell_occupied"]:
-        draw_label(frame, line, (left + 36, row), 0.40, WAIT_OCCUPIED_COLOUR_BGR)
-        row += 17
-    row += 8
-    cv2.circle(frame, (left + 19, row - 5), 9, PANEL_EDGE_BGR, 5, cv2.LINE_AA)
-    cv2.circle(frame, (left + 19, row - 5), 9, WAIT_RIGHT_OF_WAY_COLOUR_BGR, 3, cv2.LINE_AA)
+        draw_panel_text(frame, line, (text_left, row), 0.44 * render_scale, PANEL_TEXT_BGR)
+        row += int(round(18 * render_scale))
+    row += int(round(8 * render_scale))
+    draw_ring(frame, (marker_x, row - int(round(5 * render_scale))), marker_radius,
+              WAIT_RIGHT_OF_WAY_COLOUR_BGR, render_scale)
     for line in WAIT_LABELS["pass_order"]:
-        draw_label(frame, line, (left + 36, row), 0.40, WAIT_RIGHT_OF_WAY_COLOUR_BGR)
-        row += 17
-    draw_label(frame, "%d stations" % len(map_data["stations"]), (left + 10, height - 14),
-               0.40, PANEL_EDGE_BGR)
+        draw_panel_text(frame, line, (text_left, row), 0.44 * render_scale, PANEL_TEXT_BGR)
+        row += int(round(18 * render_scale))
+    draw_panel_text(frame, "%d stations" % len(map_data["stations"]),
+                    (left + int(round(12 * render_scale)), height - int(round(14 * render_scale))),
+                    0.44 * render_scale, PANEL_TEXT_BGR)
 
 
-def draw_overlay(frame, state, layout, camera, map_data, total_orders, speed_text):
+def draw_overlay(frame, state, layout, camera, map_data, total_orders, speed_text, render_scale):
     """Draws the whole overlay for one composed frame from the run-log state.
     @param frame the image to draw on
     @param state the run-log frame
@@ -532,13 +604,14 @@ def draw_overlay(frame, state, layout, camera, map_data, total_orders, speed_tex
     @param map_data the map dictionary
     @param total_orders how many orders the run releases
     @param speed_text the playback speed text
+    @param render_scale the output size as a fraction of the composed size
     """
     if state is None:
         return
-    draw_stations(frame, layout, camera, map_data["stations"])
-    draw_robots(frame, layout, camera, state)
-    draw_top_bar(frame, state, total_orders, speed_text)
-    draw_legend(frame, layout, state, map_data)
+    draw_stations(frame, layout, camera, map_data["stations"], render_scale)
+    draw_robots(frame, layout, camera, state, render_scale)
+    draw_top_bar(frame, state, total_orders, speed_text, render_scale)
+    draw_legend(frame, layout, state, map_data, render_scale)
 
 
 def open_writer(path, fps, width, height):
@@ -583,12 +656,10 @@ def render_video(raw_path, out_path, fps, camera, layout, run_log, map_data, fra
         if not ok:
             break
         if index % step == 0:
-            frame = compose_frame(raw, layout)
+            frame = compose_frame(raw, layout, scale)
             time = frame_times[index] if index < len(frame_times) else None
             draw_overlay(frame, state_at(run_log, time) if time is not None else None,
-                         layout, camera, map_data, total_orders, speed_text)
-            if scale != 1.0:
-                frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+                         layout, camera, map_data, total_orders, speed_text, scale)
             writer.write(frame)
             kept += 1
         index += 1
@@ -686,11 +757,10 @@ def render_gif(raw_path, out_path, camera, layout, run_log, map_data, frame_time
             break
         time = frame_times[index] if index < len(frame_times) else None
         if time is not None and start <= time <= end and index % step == 0:
-            frame = compose_frame(raw, layout)
+            frame = compose_frame(raw, layout, scale)
             draw_overlay(frame, state_at(run_log, time), layout, camera, map_data,
-                         total_orders, "1x")
-            frames.append(cv2.resize(frame, (width, int(frame.shape[0] * scale)),
-                                     interpolation=cv2.INTER_AREA))
+                         total_orders, "1x", scale)
+            frames.append(frame)
         index += 1
     source.release()
     if not frames:
@@ -870,6 +940,25 @@ def alignment_report(full_path, layout, camera, run_log, frame_times):
     return largest, checked
 
 
+def crop_legend(still_path, out_path, render_scale):
+    """Saves a 2x crop of the legend panel from a still so the text can be checked.
+    @param still_path the still PNG to crop
+    @param out_path the PNG to write
+    @param render_scale the still size as a fraction of the composed size
+    """
+    frame = cv2.imread(still_path)
+    if frame is None:
+        return None
+    height, width = frame.shape[:2]
+    left = width - int(round(LEGEND_WIDTH * render_scale))
+    top = int(round(HEADER_HEIGHT * render_scale))
+    panel = frame[top:height, left:width]
+    zoom = cv2.resize(panel, (panel.shape[1] * 2, panel.shape[0] * 2),
+                      interpolation=cv2.INTER_NEAREST)
+    cv2.imwrite(out_path, zoom)
+    return out_path
+
+
 def main():
     """Parses the arguments, renders the videos and prints the checks."""
     parser = argparse.ArgumentParser()
@@ -1010,6 +1099,10 @@ def main():
     else:
         print("label edge check: no label runs past a frame edge in the three stills",
               flush=True)
+
+    zoom_path = os.path.join(args.stills_dir, "legend_zoom.png")
+    crop_legend(f"{args.stills_dir}/{args.stills_prefix}_1.png", zoom_path, 1.0)
+    print("legend zoom: %s" % zoom_path, flush=True)
 
     largest, checked = alignment_report(args.full, layout, camera, run_log, frame_times)
     print(f"alignment: {checked} robot labels checked, largest offset {largest:.1f} px",
