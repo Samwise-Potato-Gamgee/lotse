@@ -10,14 +10,17 @@
 #include <cstdint>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include "lotse/core/fleet_manager.hpp"
@@ -52,6 +55,12 @@ using lotse::core::GridCell;
 
 using lotse::service::CancelOutcome;
 using lotse::service::OrderRejected;
+
+/// One true robot position in metres, taken from the simulator ground truth.
+struct TruePose {
+    double x = 0.0;
+    double y = 0.0;
+};
 
 /// Adapts the node's live fleet manager to the shared service API and saves
 /// every order transition in the SQLite store.
@@ -226,6 +235,18 @@ public:
         }
 
         side_ = std::make_unique<lotse::ros::RosRobotSide>(*this, namespaces, starts, cell_size_);
+        starts_ = starts;
+        true_poses_.assign(static_cast<std::size_t>(fleet_size_), TruePose{});
+        for (int robot = 0; robot < fleet_size_; ++robot) {
+            const std::string topic = namespaces[static_cast<std::size_t>(robot)] + "/ground_truth";
+            pose_subscriptions_.push_back(create_subscription<nav_msgs::msg::Odometry>(
+                topic, 10, [this, robot](const nav_msgs::msg::Odometry::SharedPtr message) {
+                    if (robot < static_cast<int>(true_poses_.size())) {
+                        true_poses_[static_cast<std::size_t>(robot)] = {
+                            message->pose.pose.position.x, message->pose.pose.position.y};
+                    }
+                }));
+        }
         planner_ = std::make_unique<lotse::core::PrioritizedPlanner>(
             lotse::core::PrioritizedOptions{lotse::core::AgentOrder::FarthestFirst, 0,
                                             lotse::core::continuousHorizon(map_, fleet_size_), 8,
@@ -250,6 +271,13 @@ public:
         orders_ = lotse::core::generateOrders(map_, options, static_cast<std::uint32_t>(seed));
         start_time_ = clock_.now();
         wall_start_ = std::chrono::steady_clock::now();
+        const std::size_t slash = result_path_.find_last_of('/');
+        run_log_path_ =
+            (slash == std::string::npos ? std::string("run_log.jsonl")
+                                        : result_path_.substr(0, slash + 1) + "run_log.jsonl");
+        run_log_.open(run_log_path_);
+        prevPassOrder_.assign(static_cast<std::size_t>(fleet_size_), 0.0);
+        prevCellOccupied_.assign(static_cast<std::size_t>(fleet_size_), 0.0);
 
         if (dashboard_port >= 0) {
             api_ = std::make_unique<lotse::service::ApiServer>(*source_, bind_address,
@@ -298,6 +326,7 @@ private:
                 break;
             }
         }
+        writeRunLog();
         if (api_) {
             api_->publishFleet();
         }
@@ -323,7 +352,85 @@ private:
     /// Writes the result file and stops the launch.
     void finish() {
         writeResult();
+        writeRunLog();
         rclcpp::shutdown();
+    }
+
+    /// Returns the name of the station or parking cell at a grid cell.
+    /// @param cell the cell to name
+    [[nodiscard]] std::string stationName(GridCell cell) const {
+        for (const std::pair<std::string, GridCell>& entry : map_.stations()) {
+            if (entry.second == cell) {
+                return entry.first;
+            }
+        }
+        const std::vector<GridCell>& parking = map_.parkingCells();
+        for (std::size_t index = 0; index < parking.size(); ++index) {
+            if (parking[index] == cell) {
+                return "parking" + std::to_string(index);
+            }
+        }
+        return "cell";
+    }
+
+    /// Writes one run-log line for the video overlay: true positions, tasks and
+    /// the reason each robot is waiting, all stamped with simulated time.
+    void writeRunLog() {
+        if (!run_log_.is_open()) {
+            return;
+        }
+        const std::vector<lotse::core::RobotStatus> statuses = manager_->robotStatuses();
+        const std::vector<int> orderIds = manager_->robotOrderIds();
+        const lotse::core::ManagerDiagnostics diag = manager_->diagnostics();
+        const lotse::core::ThroughputStats stats = manager_->throughput();
+        const double absoluteSeconds =
+            std::chrono::duration<double>(clock_.now().time_since_epoch()).count();
+        std::ostringstream line;
+        line << R"({"t":)" << std::fixed << std::setprecision(3) << simulatedSeconds()
+             << R"(,"t_abs":)" << absoluteSeconds << R"(,"done":)" << stats.ordersCompleted
+             << R"(,"released":)" << next_order_ << R"(,"robots":[)";
+        for (int robot = 0; robot < fleet_size_; ++robot) {
+            const auto slot = static_cast<std::size_t>(robot);
+            if (robot > 0) {
+                line << ',';
+            }
+            std::string phase = "parked";
+            std::string station = stationName(starts_[slot]);
+            int orderId = slot < orderIds.size() ? orderIds[slot] : -1;
+            if (orderId >= 0) {
+                const std::optional<lotse::core::ManagedOrder> managed = manager_->order(orderId);
+                if (managed.has_value()) {
+                    const bool carrying = managed->state == lotse::core::OrderState::InProgress;
+                    phase = carrying ? "dropoff" : "pickup";
+                    station =
+                        stationName(carrying ? managed->order.dropoff : managed->order.pickup);
+                }
+            } else if (slot < statuses.size() && statuses[slot].cell != starts_[slot]) {
+                phase = "parking";
+            }
+            std::string wait = "none";
+            if (slot < diag.passOrderWaitSeconds.size() &&
+                diag.passOrderWaitSeconds[slot] > prevPassOrder_[slot]) {
+                wait = "pass_order";
+            } else if (slot < diag.cellOccupiedWaitSeconds.size() &&
+                       diag.cellOccupiedWaitSeconds[slot] > prevCellOccupied_[slot]) {
+                wait = "cell_occupied";
+            }
+            const double x = slot < true_poses_.size() ? true_poses_[slot].x : 0.0;
+            const double y = slot < true_poses_.size() ? true_poses_[slot].y : 0.0;
+            line << R"({"id":)" << robot << R"(,"x":)" << x << R"(,"y":)" << y << R"(,"order":)"
+                 << orderId << R"(,"phase":")" << phase << R"(,"station":")" << station
+                 << R"(,"wait":")" << wait << R"("})";
+        }
+        line << "]}\n";
+        run_log_ << line.str();
+        run_log_.flush();
+        for (std::size_t index = 0; index < prevPassOrder_.size(); ++index) {
+            if (index < diag.passOrderWaitSeconds.size()) {
+                prevPassOrder_[index] = diag.passOrderWaitSeconds[index];
+                prevCellOccupied_[index] = diag.cellOccupiedWaitSeconds[index];
+            }
+        }
     }
 
     /// Writes the counters as one JSON object.
@@ -406,6 +513,13 @@ private:
     std::size_t next_order_ = 0;
     int step_ = 0;
     long long stopped_frames_ = 0;
+    std::string run_log_path_;
+    std::ofstream run_log_;
+    std::vector<lotse::core::GridCell> starts_;
+    std::vector<TruePose> true_poses_;
+    std::vector<rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr> pose_subscriptions_;
+    std::vector<double> prevPassOrder_;
+    std::vector<double> prevCellOccupied_;
     std::chrono::steady_clock::time_point start_time_;
     std::chrono::steady_clock::time_point wall_start_;
     rclcpp::TimerBase::SharedPtr timer_;
