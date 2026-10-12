@@ -36,6 +36,14 @@ public:
     /// Returns true when the last plan call stopped because it hit its time
     /// limit rather than because no solution exists. The default is false.
     [[nodiscard]] virtual bool lastCallTimedOut() const noexcept { return false; }
+
+    /// Returns the robot order the last plan call used, or an empty list when
+    /// the planner does not report one. The default is empty.
+    [[nodiscard]] virtual std::vector<int> lastPlanningOrder() const { return {}; }
+
+    /// Returns the attempt number the last plan call succeeded on, or -1 when
+    /// the planner does not report one. The default is -1.
+    [[nodiscard]] virtual int lastPlanningAttempt() const noexcept { return -1; }
 };
 
 }  // namespace lotse::core

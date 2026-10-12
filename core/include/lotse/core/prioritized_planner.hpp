@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "lotse/core/planner.hpp"
@@ -23,6 +25,7 @@ struct PrioritizedOptions {
     int attempts = 8;
     int timeLimitMs = 0;
     bool oneStepGap = false;
+    bool stableOrder = false;
 };
 
 /// The longest single-leg route a continuous run is expected to need. Limits
@@ -51,14 +54,28 @@ public:
     /// Returns true when the last plan call stopped on its time limit.
     [[nodiscard]] bool lastCallTimedOut() const noexcept override;
 
+    /// Returns the robot ids in the order the last successful plan call used.
+    [[nodiscard]] std::vector<int> lastPlanningOrder() const override;
+
+    /// Returns the first attempt number that succeeded in the last call.
+    [[nodiscard]] int lastPlanningAttempt() const noexcept override;
+
     /// Computes the time horizon used for one planning call.
     /// @param map the warehouse grid
     /// @param agents the fleet being planned
     [[nodiscard]] int horizonFor(const Map& map, const std::vector<Agent>& agents) const;
 
 private:
+    /// Builds the first-attempt order: robots whose goal is unchanged keep
+    /// their previous place, and the rest are added farthest first.
+    /// @param agents the fleet being planned
+    [[nodiscard]] std::vector<std::size_t> stableOrder(const std::vector<Agent>& agents) const;
+
     PrioritizedOptions options_{};
     bool lastTimedOut_ = false;
+    std::vector<int> lastOrder_;
+    int lastAttempt_ = -1;
+    std::vector<std::pair<int, GridCell>> stable_;
 };
 
 }  // namespace lotse::core

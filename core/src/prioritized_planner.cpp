@@ -136,6 +136,8 @@ PrioritizedPlanner::PrioritizedPlanner(PrioritizedOptions options) : options_(op
 
 std::optional<Plan> PrioritizedPlanner::plan(const Map& map, const std::vector<Agent>& agents) {
     lastTimedOut_ = false;
+    lastOrder_.clear();
+    lastAttempt_ = -1;
     const int horizon = horizonFor(map, agents);
     const auto deadline =
         options_.timeLimitMs > 0
@@ -148,11 +150,26 @@ std::optional<Plan> PrioritizedPlanner::plan(const Map& map, const std::vector<A
             lastTimedOut_ = true;
             return std::nullopt;
         }
-        const std::vector<std::size_t> order = attemptOrder(attempt, agents, options_.order);
+        const std::vector<std::size_t> order = attempt == 0 && options_.stableOrder
+                                                   ? stableOrder(agents)
+                                                   : attemptOrder(attempt, agents, options_.order);
         bool timedOut = false;
         std::optional<Plan> planned =
             planInOrder(map, agents, order, horizon, deadline, timedOut, options_.oneStepGap);
         if (planned.has_value()) {
+            lastOrder_.clear();
+            lastOrder_.reserve(order.size());
+            for (const std::size_t index : order) {
+                lastOrder_.push_back(agents[index].id);
+            }
+            lastAttempt_ = attempt;
+            if (options_.stableOrder) {
+                stable_.clear();
+                stable_.reserve(order.size());
+                for (const std::size_t index : order) {
+                    stable_.emplace_back(agents[index].id, agents[index].goal);
+                }
+            }
             return planned;
         }
         if (timedOut) {
@@ -169,6 +186,37 @@ std::string PrioritizedPlanner::name() const {
 
 bool PrioritizedPlanner::lastCallTimedOut() const noexcept {
     return lastTimedOut_;
+}
+
+std::vector<int> PrioritizedPlanner::lastPlanningOrder() const {
+    return lastOrder_;
+}
+
+int PrioritizedPlanner::lastPlanningAttempt() const noexcept {
+    return lastAttempt_;
+}
+
+std::vector<std::size_t> PrioritizedPlanner::stableOrder(const std::vector<Agent>& agents) const {
+    std::vector<std::size_t> order;
+    std::vector<bool> placed(agents.size(), false);
+    for (const auto& [id, goal] : stable_) {
+        for (std::size_t index = 0; index < agents.size(); ++index) {
+            if (!placed[index] && agents[index].id == id && agents[index].goal == goal) {
+                order.push_back(index);
+                placed[index] = true;
+                break;
+            }
+        }
+    }
+    std::vector<std::size_t> rest;
+    for (std::size_t index = 0; index < agents.size(); ++index) {
+        if (!placed[index]) {
+            rest.push_back(index);
+        }
+    }
+    sortByDistance(rest, agents, true);
+    order.insert(order.end(), rest.begin(), rest.end());
+    return order;
 }
 
 int PrioritizedPlanner::horizonFor(const Map& map, const std::vector<Agent>& agents) const {
