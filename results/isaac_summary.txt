@@ -3,10 +3,10 @@ Command: ./scripts/run_isaac_runs.sh
 4 Carter robots, warehouse_small, 12 orders, forward raycast scan, simulator clock.
 Contacts are the independent judge on true poses and the simulator's own reports.
 
-run         seed orders  done    judge    sim deadlock    grid   closest    sim_sec wall_sec status
-seed1          1     12    12        0      0    false       0     0.923      227.4   1411.9     ok
-seed2          2     12    12        0      0    false       0     0.955      254.3    209.6     ok
-seed3          3     12    12        0      0    false       0     0.977      269.7    254.8     ok
-obstacle       1     12    12        0      0    false       0     0.961      246.2    288.0     ok
+run         seed orders  done    judge    sim deadlock    grid   closest    sim_sec wall_sec  calls max_ms   reject    alarm status
+seed1          1     12    12        0      0    false       0     0.953      235.6    215.2     61     0.15        0  false     ok
+seed2          2     12    12        0      0    false       0     0.978      241.9    223.3     64     0.19        0  false     ok
+seed3          3     12    12        0      0    false       0     0.912      279.1    251.1     69     0.14        0  false     ok
+obstacle       1     12    12        0      0    false       0     0.970      247.2    230.5     58     0.21        0  false     ok
 
 failures: 0

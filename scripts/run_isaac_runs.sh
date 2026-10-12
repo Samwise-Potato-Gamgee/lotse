@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Runs the stage 7 Isaac Sim matrix: three seeded runs of 4 robots with a fixed
-# 12-order list, plus one obstacle run (also recorded), then aggregates the
-# results into results/isaac_runs.csv and results/isaac_summary.txt. Exits
-# non-zero when any run misses the required result.
+# Runs the Isaac Sim matrix on the final code: three seeded runs of 4 robots
+# with a fixed 12-order list, plus one obstacle run (no recording), then
+# aggregates the results into results/isaac_runs.csv and
+# results/isaac_summary.txt. Exits non-zero when any run misses the required
+# result.
 
 set -euo pipefail
 
@@ -17,7 +18,7 @@ if [[ "${LOTSE_ISAAC_SKIP_RUNS:-0}" != "1" ]]; then
     for seed in $(seq 1 "${SEEDS}"); do
         ./scripts/run_isaac_demo.sh "${seed}" normal 0 || true
     done
-    ./scripts/run_isaac_demo.sh 1 obstacle 1 || true
+    ./scripts/run_isaac_demo.sh 1 obstacle 0 || true
 fi
 
 # Reads a numeric field from a small JSON result file, ignoring spaces.
@@ -36,7 +37,7 @@ readBool() {
 }
 
 mkdir -p "${REPO_ROOT}/results"
-echo "run,seed,obstacle,orders,completed,judge_contacts,sim_contacts,deadlocked,grid,min_distance,sim_seconds,wall_seconds,stopped_frames,status" > "${RAW}"
+echo "run,seed,obstacle,orders,completed,judge_contacts,sim_contacts,deadlocked,grid,min_distance,sim_seconds,wall_seconds,stopped_frames,planning_calls,planning_max_ms,plan_rejections,progress_alarm,status" > "${RAW}"
 
 FAILURES=0
 for spec in "seed1:1:no:run-1-normal" "seed2:2:no:run-2-normal" \
@@ -51,7 +52,7 @@ for spec in "seed1:1:no:run-1-normal" "seed2:2:no:run-2-normal" \
     judge="${dir}/judge.json"
     scene="${dir}/scene.json"
     if [[ ! -f "${fleet}" || ! -f "${judge}" || ! -f "${scene}" ]]; then
-        printf '%s,%s,%s,0,0,-1,-1,true,-1,0,0,0,0,MISSING\n' \
+        printf '%s,%s,%s,0,0,-1,-1,true,-1,0,0,0,0,-1,0,-1,true,MISSING\n' \
             "${name}" "${seed}" "${obstacle}" >> "${RAW}"
         FAILURES=$((FAILURES + 1))
         continue
@@ -66,18 +67,25 @@ for spec in "seed1:1:no:run-1-normal" "seed2:2:no:run-2-normal" \
     sim_seconds=$(readValue "${fleet}" sim_seconds)
     wall_seconds=$(readValue "${fleet}" wall_seconds)
     stopped=$(readValue "${fleet}" stopped_frames)
+    planning_calls=$(readValue "${fleet}" planning_calls)
+    planning_max=$(readValue "${fleet}" planning_max_ms)
+    rejections=$(readValue "${fleet}" plan_rejections)
+    progress=$(readBool "${fleet}" progress_alarm)
     status="ok"
     if [[ "${completed}" -lt "${orders}" || "${judge_contacts}" -ne 0 ||
-        "${sim_contacts}" -ne 0 || "${deadlocked}" != "false" || "${grid}" -ne 0 ]]; then
+        "${sim_contacts}" -ne 0 || "${deadlocked}" != "false" || "${grid}" -ne 0 ||
+        "${progress}" != "false" ]]; then
         status="FAIL"
     fi
     if [[ "${obstacle}" == "yes" && "${stopped}" -eq 0 ]]; then
         status="FAIL"
     fi
-    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
         "${name}" "${seed}" "${obstacle}" "${orders}" "${completed}" \
         "${judge_contacts}" "${sim_contacts}" "${deadlocked}" "${grid}" \
-        "${min_distance}" "${sim_seconds}" "${wall_seconds}" "${stopped}" "${status}" >> "${RAW}"
+        "${min_distance}" "${sim_seconds}" "${wall_seconds}" "${stopped}" \
+        "${planning_calls}" "${planning_max}" "${rejections}" "${progress}" \
+        "${status}" >> "${RAW}"
     if [[ "${status}" != "ok" ]]; then
         FAILURES=$((FAILURES + 1))
     fi
@@ -89,11 +97,11 @@ done
     echo "4 Carter robots, warehouse_small, 12 orders, forward raycast scan, simulator clock."
     echo "Contacts are the independent judge on true poses and the simulator's own reports."
     echo
-    printf '%-10s %5s %6s %5s %8s %6s %8s %7s %9s %10s %8s %6s\n' \
-        "run" "seed" "orders" "done" "judge" "sim" "deadlock" "grid" "closest" "sim_sec" "wall_sec" "status"
+    printf '%-10s %5s %6s %5s %8s %6s %8s %7s %9s %10s %8s %6s %6s %8s %8s %6s\n' \
+        "run" "seed" "orders" "done" "judge" "sim" "deadlock" "grid" "closest" "sim_sec" "wall_sec" "calls" "max_ms" "reject" "alarm" "status"
     awk -F, 'NR > 1 {
-        printf "%-10s %5s %6s %5s %8s %6s %8s %7s %9.3f %10.1f %8.1f %6s\n",
-            $1, $2, $4, $5, $6, $7, $8, $9, $10, $11, $12, $14
+        printf "%-10s %5s %6s %5s %8s %6s %8s %7s %9.3f %10.1f %8.1f %6s %8.2f %8s %6s %6s\n",
+            $1, $2, $4, $5, $6, $7, $8, $9, $10, $11, $12, $14, $15, $16, $17, $18
     }' "${RAW}"
     echo
     echo "failures: ${FAILURES}"
